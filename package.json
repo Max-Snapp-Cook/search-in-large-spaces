@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:bridge": "javac -cp Ludii.jar LudiiBridge.java",
-    "run:lud": "java -cp Ludii.jar:. LudiiBridge",
+    "build:bridge": "node ludiiRunner.js --build",
+    "run:lud": "node ludiiRunner.js",
     "gen": "node pipeline.js"
   },
   "dependencies": {

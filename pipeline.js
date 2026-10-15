@@ -7,13 +7,21 @@ import "dotenv/config";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { ChatOpenAI } from "@langchain/openai";
-import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { rulesPrompt, translatePrompt, repairPrompt } from "./prompts.js";
+import { extractLud, repairUntilPlayable } from "./repairLoop.js";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 
+if (!process.env.GEMINI_API_KEY?.trim()) {
+  throw new Error("Set GEMINI_API_KEY in .env before running the pipeline.");
+}
+
+// Gemini's OpenAI-compatible endpoint works with the existing LangChain chains.
 const model = new ChatOpenAI({
-  model: "openrouter:z-ai/glm-5.3-flash",
-  apiKey: process.env.BAYLEAF_API_KEY,
-  configuration: { baseURL: "https://api.bayleaf.dev/v1" },
+  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  apiKey: process.env.GEMINI_API_KEY,
+  configuration: {
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+  },
 });
 
 // Load the example .lud files
@@ -25,41 +33,15 @@ async function loadExamples(dir = "examples") {
   return examples.join("\n\n");
 }
 
-// Generate the rules from the game idea
-const rulesPrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You are a board game designer. Your games must be implementable in the Ludii game system."],
-  ["human",
-`Reference Ludii games:
-{examples}
-
-Using these games as reference, design a new game based on this idea: {idea}
-
-Write complete plain-English rules: board, pieces, setup, turns, legal moves, captures, and how the game ends.
-Only use mechanics similar to the reference games. Start with the game's name. No code.`],
-]);
-
-// Translate the rules into .lud code
-const translatePrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You translate game rules into Ludii .lud code, using only ludemes that appear in the reference games."],
-  ["human",
-`Reference Ludii games:
-{examples}
-
-Rules:
-{rules}
-
-Output ONLY the .lud code inside a single \`\`\`lud code block.`],
-]);
-
 const rulesChain = rulesPrompt.pipe(model).pipe(new StringOutputParser());
 const translateChain = translatePrompt.pipe(model).pipe(new StringOutputParser());
-
-function extractLud(text) {
-  const match = text.match(/```(?:lud)?\s*([\s\S]*?)```/);
-  return (match ? match[1] : text).trim();
-}
+const repairChain = repairPrompt.pipe(model).pipe(new StringOutputParser());
 
 async function run(idea) {
+  const maxRepairs = Number(process.env.MAX_REPAIRS ?? 5);
+  if (!Number.isSafeInteger(maxRepairs) || maxRepairs < 0) {
+    throw new Error("MAX_REPAIRS must be a nonnegative integer.");
+  }
   const examples = await loadExamples();
 
   const rules = await rulesChain.invoke({ examples, idea });
@@ -68,16 +50,22 @@ async function run(idea) {
   const code = extractLud(await translateChain.invoke({ examples, rules }));
   console.log("\nLUD:\n", code);
 
-  // Save so you can open game.lud in Ludii and check it
-  const outDir = path.join("outputs", new Date().toISOString().replace(/[:.]/g, "-"));
-  await fs.mkdir(outDir, { recursive: true });
+  // A unique directory keeps every attempt and its validation feedback together.
+  await fs.mkdir("outputs", { recursive: true });
+  const outDir = await fs.mkdtemp(path.join("outputs", `${new Date().toISOString().replace(/[:.]/g, "-")}-`));
   await fs.writeFile(path.join(outDir, "rules.md"), rules);
-  await fs.writeFile(path.join(outDir, "game.lud"), code);
-  console.log(`\nSaved to ${outDir}`);
+  await repairUntilPlayable({
+    code, rules, examples, outDir, maxRepairs,
+    repair: (input) => repairChain.invoke(input),
+  });
+  console.log(`\nValidated game saved to ${path.join(outDir, "game.lud")}`);
 }
 
 const idea = process.argv[2] ?? "a two-player capture game on a hexagonal board";
-run(idea).catch(console.error);
+run(idea).catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
 // Load the example .lud files
 
 // Generate the rules from the game idea
