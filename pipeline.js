@@ -17,7 +17,7 @@ if (!process.env.GEMINI_API_KEY?.trim()) {
 
 // Gemini's OpenAI-compatible endpoint works with the existing LangChain chains.
 const model = new ChatOpenAI({
-  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
   apiKey: process.env.GEMINI_API_KEY,
   configuration: {
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
