@@ -11,8 +11,8 @@ const rulesPrompt = ChatPromptTemplate.fromMessages([
 
 Using these games as reference, design a new game based on this idea: {idea}
 
-Write complete plain-English rules: board, pieces, setup, turns, legal moves, captures, and how the game ends.
-Only use mechanics similar to the reference games. Start with the game's name. No code.`],
+Write complete plain-English rules: board, pieces, setup, turns, legal moves, and how the game ends.
+Use the example games as styles of games that are plausible but create a unique and creative game. Start with the game's name. No code.`],
 ]);
 
 // Translate the rules into .lud code

@@ -5,7 +5,7 @@
 Install dependencies with `npm install`. Copy `.env.example` to `.env` (or add
 the settings to your existing `.env`) and set `GEMINI_API_KEY` to a key from
 [Google AI Studio](https://aistudio.google.com/apikey).
-Optionally set `GEMINI_MODEL`; the default is `gemini-2.5-flash`.
+Optionally set `GEMINI_MODEL`; the default is `gemini-3.8-flash`.
 
 ```powershell
 npm run gen -- "a two-player capture game on a hexagonal board"
