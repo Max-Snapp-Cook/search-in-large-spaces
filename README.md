@@ -28,7 +28,10 @@ Game idea + reference games in examples/
 
 Ludii is the game engine used here. A `.lud` file describes a game's board, pieces, setup, moves, and ending conditions using building blocks called *ludemes*. The JavaScript code coordinates generation; the Java bridge lets it compile and run games in Ludii without opening a graphical window.
 
-Each generation run follows these steps:
+Install dependencies with `npm install`. Copy `.env.example` to `.env` (or add
+the settings to your existing `.env`) and set `GEMINI_API_KEY` to a key from
+[Google AI Studio](https://aistudio.google.com/apikey).
+Optionally set `GEMINI_MODEL`; the default is `gemini-3.8-flash`.
 
 1. Read every `.lud` file directly inside `examples/`. The supplied references are Chess, Go, Shogi, and Tic-Tac-Toe.
 2. Use `rulesPrompt` to turn the idea into complete English rules.

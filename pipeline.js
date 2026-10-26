@@ -21,7 +21,7 @@ if (reasoningEffort && !["minimal", "low", "medium", "high"].includes(reasoningE
   throw new Error("GEMINI_REASONING_EFFORT must be minimal, low, medium, or high (or unset for the model default).");
 }
 const model = new ChatOpenAI({
-  model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  model: process.env.GEMINI_MODEL || "gemini-3.8-flash",
   apiKey: process.env.GEMINI_API_KEY,
   // Pass through directly: LangChain's reasoning helper filters non-OpenAI model names.
   ...(reasoningEffort ? { modelKwargs: { reasoning_effort: reasoningEffort } } : {}),
