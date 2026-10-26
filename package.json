@@ -5,7 +5,8 @@
   "scripts": {
     "build:bridge": "node ludiiRunner.js --build",
     "run:lud": "node ludiiRunner.js",
-    "gen": "node pipeline.js"
+    "gen": "node pipeline.js",
+    "summarize:attempts": "node summarizeAttempts.js"
   },
   "dependencies": {
     "@langchain/core": "^1.2.17",

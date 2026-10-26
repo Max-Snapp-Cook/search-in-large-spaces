@@ -78,14 +78,45 @@ A successful check prints JSON containing `"ok": true` and `"stage": "complete"`
 
 ### Configuration
 
+Keep `LUDII_VERBOSE=false` for normal runs. The runner now drains verbose stderr
+while retaining only a bounded beginning/end excerpt, so noisy diagnostics do
+not fill attempt JSON files or trigger stderr buffer overflow. Saved diagnostics
+and compiler logs are limited to 8,000 characters each; error lists retain up to
+10 messages of 2,000 characters each. HTML errors retain their heading instead
+of repeating the full game source. `diagnosticsTruncated`, `logTruncated`, and
+`compactedFields` identify omitted detail. Existing reports are not rewritten.
+
+Validation reports now include `compilerReport` with Ludii's errors, warnings,
+notes, and log. Set `LUDII_VERBOSE=true` in `.env` for verbose compiler logging
+(also available as `validateWithLudii(file, { verbose: true })`). Logs in JSON
+are capped at 32,000 characters and include a `logTruncated` flag; very noisy
+process output can still exceed the runner's output limit.
+
+Failed game checks also include `sourceContext`: candidate line numbers and
+numbered excerpts matched from error tokens in the original `.lud`. These are
+heuristic text matches, not compiler-confirmed locations; comments, multiple
+occurrences, and macro expansion can make them ambiguous or absent. At most
+five matches per token are included. Repair feedback prioritizes structured
+errors and these excerpts ahead of stack traces and logs, within its existing
+20,000-character limit.
+
+Rebuild with `npm run build:bridge` after updating the Java source. Existing
+attempt reports are unchanged; rerunning validation produces the richer report.
+The summarizer preserves these fields when aggregating new reports.
+
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | None | Required for generation and repair requests. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Model used by all three prompt chains. |
+| `GEMINI_REASONING_EFFORT` | Model default | Optional `minimal`, `low`, `medium`, or `high`. Applies to generation, translation, and repair; support depends on the selected model. |
 | `MAX_REPAIRS` | `5` | Maximum repairs after the initial attempt; must be a nonnegative integer. `0` validates once without repairs. |
 | `LUDII_JAR` | `Ludii.jar` at the repository root | Path to the engine JAR. |
 | `JAVA_BIN` | `java` | Java runtime executable name or full path. |
 | `JAVAC_BIN` | `javac` | Java compiler executable name or full path. |
+
+For example, add `GEMINI_REASONING_EFFORT=high` to `.env` to request more reasoning.
+Leave it unset or empty to retain the provider default. Higher effort can increase
+latency and token usage. Both translation and every repair receive `ludii-style.md`.
 
 For example, custom Windows paths can be added to `.env` as:
 

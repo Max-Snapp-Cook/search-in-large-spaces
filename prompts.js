@@ -12,14 +12,21 @@ const rulesPrompt = ChatPromptTemplate.fromMessages([
 Using these games as reference, design a new game based on this idea: {idea}
 
 Write complete plain-English rules: board, pieces, setup, turns, legal moves, captures, and how the game ends.
-Only use mechanics similar to the reference games. Start with the game's name. No code.`],
+The rules should be specific enough that they will be implemented exactly the same by any programmer coding the game.
+Start with the game's name. No code.`],
 ]);
 
 // Translate the rules into .lud code
 const translatePrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You translate game rules into Ludii .lud code, using only ludemes that appear in the reference games."],
+  ["system", "You translate game rules into Ludii .lud code."],
   ["human",
-`Reference Ludii games:
+`Ludii syntax and logic guide:
+{styleGuide}
+
+Follow this guide when implementing the rules. Preserve the written game rules and use the references to verify syntax.
+It is important to avoid compilation errors by referencing the syntax and logic guide.
+
+Reference Ludii games:
 {examples}
 
 Rules:
@@ -32,7 +39,12 @@ Output ONLY the .lud code inside a single \`\`\`lud code block.`],
 const repairPrompt = ChatPromptTemplate.fromMessages([
   ["system", "You repair Ludii .lud code using error feedback from Ludii, using only ludemes that appear in the reference games."],
   ["human",
-`Reference Ludii games:
+`Ludii syntax and logic guide:
+{styleGuide}
+
+Follow this guide when repairing the code. Preserve the written rules and verify syntax against the references.
+
+Reference Ludii games:
 {examples}
 
 Original rules:

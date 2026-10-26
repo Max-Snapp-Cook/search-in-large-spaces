@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Random;
 import game.Game;
 import main.grammar.Description;
+import main.grammar.Report;
+import main.options.UserSelections;
 import other.context.Context;
 import other.trial.Trial;
 
@@ -25,16 +27,20 @@ public final class LudiiBridge {
         result.put("errors", errors);
         result.put("stats", null);
         int exitCode = 1;
+        Report compilerReport = new Report();
+        boolean verbose = false;
         try {
-            if (args.length < 1 || args.length > 3)
-                throw new IllegalArgumentException("Usage: LudiiBridge game.lud [playouts=0] [maxMoves=500]");
+            if (args.length < 1 || args.length > 4)
+                throw new IllegalArgumentException("Usage: LudiiBridge game.lud [playouts=0] [maxMoves=500] [verbose=false]");
+            verbose = args.length > 3 && Boolean.parseBoolean(args[3]);
             int playouts = args.length > 1 ? Integer.parseInt(args[1]) : 0;
             int maxMoves = args.length > 2 ? Integer.parseInt(args[2]) : 500;
             if (playouts < 0 || maxMoves < 1)
                 throw new IllegalArgumentException("playouts must be >= 0 and maxMoves must be >= 1.");
             String source = new String(Files.readAllBytes(Paths.get(args[0])), StandardCharsets.UTF_8);
             result.put("stage", "compile");
-            Game game = (Game) compiler.Compiler.compileTest(new Description(source), false);
+            Game game = (Game) compiler.Compiler.compile(new Description(source),
+                new UserSelections(new ArrayList<String>()), compilerReport, verbose);
             if (game == null)
                 throw new IllegalStateException("Ludii returned no game. See diagnostics for compiler errors.");
             result.put("gameName", game.name());
@@ -93,6 +99,15 @@ public final class LudiiBridge {
             errors.add(error.toString());
             error.printStackTrace(System.err);
         }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("errors", compilerReport.errors());
+        details.put("warnings", compilerReport.warnings());
+        details.put("notes", compilerReport.notes());
+        String log = compilerReport.log();
+        details.put("log", log.length() > 32000 ? log.substring(0, 32000) : log);
+        details.put("logTruncated", log.length() > 32000);
+        details.put("verbose", verbose);
+        result.put("compilerReport", details);
         output.println(json(result));
         output.flush();
         System.exit(exitCode);

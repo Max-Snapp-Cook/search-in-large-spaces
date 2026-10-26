@@ -2,7 +2,7 @@
     (players 2)
     (equipment {
         (board (square 3))
-        (piece "Disc" P1)
+        (piece "Queen" P1)
         (piece "Cross" P2)
     })
     (rules

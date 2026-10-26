@@ -16,9 +16,15 @@ if (!process.env.GEMINI_API_KEY?.trim()) {
 }
 
 // Gemini's OpenAI-compatible endpoint works with the existing LangChain chains.
+const reasoningEffort = process.env.GEMINI_REASONING_EFFORT?.trim().toLowerCase();
+if (reasoningEffort && !["minimal", "low", "medium", "high"].includes(reasoningEffort)) {
+  throw new Error("GEMINI_REASONING_EFFORT must be minimal, low, medium, or high (or unset for the model default).");
+}
 const model = new ChatOpenAI({
   model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
   apiKey: process.env.GEMINI_API_KEY,
+  // Pass through directly: LangChain's reasoning helper filters non-OpenAI model names.
+  ...(reasoningEffort ? { modelKwargs: { reasoning_effort: reasoningEffort } } : {}),
   configuration: {
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
   },
@@ -43,11 +49,12 @@ async function run(idea) {
     throw new Error("MAX_REPAIRS must be a nonnegative integer.");
   }
   const examples = await loadExamples();
+  const styleGuide = await fs.readFile(new URL("./ludii-style.md", import.meta.url), "utf8");
 
   const rules = await rulesChain.invoke({ examples, idea });
   console.log("RULES:\n", rules);
 
-  const code = extractLud(await translateChain.invoke({ examples, rules }));
+  const code = extractLud(await translateChain.invoke({ examples, rules, styleGuide }));
   console.log("\nLUD:\n", code);
 
   // A unique directory keeps every attempt and its validation feedback together.
@@ -56,7 +63,7 @@ async function run(idea) {
   await fs.writeFile(path.join(outDir, "rules.md"), rules);
   await repairUntilPlayable({
     code, rules, examples, outDir, maxRepairs,
-    repair: (input) => repairChain.invoke(input),
+    repair: (input) => repairChain.invoke({ ...input, styleGuide }),
   });
   console.log(`\nValidated game saved to ${path.join(outDir, "game.lud")}`);
 }

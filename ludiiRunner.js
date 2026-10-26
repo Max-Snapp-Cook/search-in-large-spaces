@@ -1,24 +1,55 @@
 import "dotenv/config";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { sourceContext } from "./errorContext.js";
+import { clip, compactReport } from "./reportLimits.js";
 
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
 const failure = (stage, message, diagnostics = "") => ({
-  ok: false, stage, errors: [message], stats: null, diagnostics,
+  ok: false, stage, errors: [clip(message, 2000)], stats: null,
+  diagnostics: clip(diagnostics), diagnosticsTruncated: diagnostics.length > 8000,
 });
 
 function execute(command, args, options) {
   return new Promise((resolve) => {
-    execFile(command, args, {
-      cwd: projectDir, windowsHide: true, encoding: "utf8",
-      maxBuffer: 4 * 1024 * 1024, ...options,
-    }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+    let child;
+    try { child = spawn(command, args, { cwd: projectDir, windowsHide: true }); }
+    catch (error) { resolve({ error, stdout: "", stderr: "" }); return; }
+    let stdout = "", stderrHead = "", stderrTail = "", stderrLength = 0, error = null;
+    const timer = setTimeout(() => {
+      error = { killed: true, message: "Process timed out" };
+      child.kill();
+    }, options.timeout);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      if (error) return;
+      if (stdout.length + chunk.length > 1_000_000) {
+        error = { code: "OUTPUT_LIMIT", message: "Bridge JSON exceeded its 1 MB character limit." };
+        child.kill();
+      } else stdout += chunk;
+    });
+    // Keep draining verbose output without storing it all or killing the compiler.
+    child.stderr.on("data", (chunk) => {
+      stderrLength += chunk.length;
+      if (stderrHead.length < 4000) stderrHead += chunk.slice(0, 4000 - stderrHead.length);
+      stderrTail = (stderrTail + chunk).slice(-4000);
+    });
+    child.on("error", (failure) => { error = failure; });
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      const stderr = stderrLength <= 4000 ? stderrHead : stderrLength <= 8000
+        ? stderrHead + stderrTail.slice(-(stderrLength - 4000))
+        : stderrHead + "\n...[truncated]...\n" + stderrTail;
+      resolve({ error: error || (code !== 0 ? { code: code ?? "SIGNAL", message: `Process ended: ${signal || code}` } : null),
+        stdout, stderr, stderrTruncated: stderrLength > 8000 });
+    });
   });
 }
 
-export function parseBridgeResult({ error, stdout, stderr }) {
+export function parseBridgeResult({ error, stdout, stderr, stderrTruncated = false }) {
   if (error?.killed) return failure("timeout", "Ludii exceeded the process time limit.", stderr);
   if (error?.code === "ENOENT") return failure("setup", "Java was not found. Install a JDK and put java on PATH.");
   if (error && typeof error.code !== "number") return failure("process", error.message, stderr);
@@ -28,7 +59,8 @@ export function parseBridgeResult({ error, stdout, stderr }) {
       throw new Error("Unexpected bridge response shape");
     }
     if (error && result.ok) return failure("process", "Java exited unsuccessfully despite reporting success.", stderr);
-    return { ...result, diagnostics: stderr.trim() };
+    return compactReport({ ...result, diagnostics: clip(stderr.trim()),
+      diagnosticsTruncated: stderrTruncated || stderr.length > 8000 });
   } catch {
     return failure("process", "Java did not return a valid bridge result. Check the JAR, compiled bridge, and Java version.", `${stderr}\n${stdout}`.trim());
   }
@@ -52,6 +84,7 @@ export async function validateWithLudii(file, {
   playouts = 0, maxMoves = 500, timeoutMs = 60_000,
   jarPath = process.env.LUDII_JAR || path.join(projectDir, "Ludii.jar"),
   java = process.env.JAVA_BIN || "java",
+  verbose = process.env.LUDII_VERBOSE === "true",
 } = {}) {
   if (!Number.isSafeInteger(playouts) || playouts < 0 ||
       !Number.isSafeInteger(maxMoves) || maxMoves < 1 ||
@@ -67,17 +100,37 @@ export async function validateWithLudii(file, {
     try { await fs.access(required); }
     catch { return failure("setup", `Missing ${required}. Set LUDII_JAR and run npm run build:bridge.`); }
   }
-  return parseBridgeResult(await execute(java, [
+  const result = parseBridgeResult(await execute(java, [
     "-Djava.awt.headless=true", "-Dfile.encoding=UTF-8", "-cp",
     [jar, projectDir].join(path.delimiter), "LudiiBridge",
-    gameFile, String(playouts), String(maxMoves),
+    gameFile, String(playouts), String(maxMoves), String(verbose),
   ], { timeout: timeoutMs }));
+  if (!result.ok && ["compile", "initialize", "playout"].includes(result.stage)) {
+    try {
+      result.sourceContext = sourceContext(await fs.readFile(gameFile, "utf8"),
+        [...(result.compilerReport?.errors || []), ...result.errors]);
+    } catch (error) {
+      result.sourceContextError = `Could not read source context: ${error.message}`;
+    }
+  }
+  return result;
 }
 
 // Only these stages describe game failures that an LLM should try to fix.
 export function repairFeedback(result) {
   if (result.ok || !["compile", "initialize", "playout"].includes(result.stage)) return null;
-  return [`Ludii failed during ${result.stage}.`, ...result.errors, result.diagnostics || ""].join("\n").slice(0, 20_000);
+  const report = result.compilerReport;
+  const context = result.sourceContext?.length
+    ? `Candidate source locations (text matches, not compiler-confirmed lines):\n${JSON.stringify(result.sourceContext, null, 2)}` : "";
+  // Prioritize structured errors and source over repeated stack traces/verbose logs.
+  return [
+    `Ludii failed during ${result.stage}.`,
+    ...(report?.errors?.length ? report.errors : result.errors),
+    context,
+    ...(report?.warnings || []).map((text) => `Warning: ${text}`),
+    ...(report?.notes || []).map((text) => `Note: ${text}`),
+    result.diagnostics || "", report?.log || "",
+  ].filter(Boolean).join("\n").slice(0, 20_000);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
