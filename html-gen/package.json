@@ -1,0 +1,16 @@
+{
+  "name": "html-gen",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "gen": "node pipeline.js",
+    "validate": "node gameRunner.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.2.17",
+    "@langchain/openai": "^1.6.2",
+    "dotenv": "^18.0.8",
+    "jsdom": "^30.1.3"
+  }
+}

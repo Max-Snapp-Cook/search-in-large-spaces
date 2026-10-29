@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game</title>
+<style>
+  :root {
+    --bg: #f3f1ec; --panel: #ffffff; --text: #1f2328; --muted: #6b7280; --border: #e3e0d8;
+    --accent: #3b6fd8; --danger: #c43d3d; --shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15181e; --panel: #1e222a; --text: #e8eaed; --muted: #9aa0aa; --border: #2e333d; --accent: #6b9bff; --danger: #ff7272; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { max-width: 1240px; margin: 0 auto; padding: 20px 16px 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+  h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; }
+  #players { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
+  .dot { width: 16px; height: 16px; flex: none; border-radius: 50%; border: 1px solid rgba(127,127,127,.6); }
+  .chip.active { color: var(--text); border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+  main { max-width: 1240px; margin: 0 auto; padding: 8px 16px 32px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  @media (max-width: 820px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  #stage { position: relative; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; min-height: 320px; }
+  #status { font-size: 1.1rem; font-weight: 600; min-height: 1.6em; text-align: center; }
+  #status.over { color: var(--accent); }
+  #board { width: 100%; max-width: 900px; display: flex; justify-content: center; }
+  #board > * { max-width: 100%; }
+  #curtain { display: none; position: absolute; inset: 0; z-index: 10; border-radius: 14px; background: var(--panel); flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 24px; }
+  #curtain.up { display: flex; }
+  #curtain p { margin: 0; font-size: 1.3rem; font-weight: 600; }
+  #curtain button { flex: none; padding: 10px 24px; }
+  aside { display: flex; flex-direction: column; gap: 16px; }
+  aside .card { padding: 16px; }
+  label, .label { display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+  select, button { font: inherit; color: inherit; }
+  select { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  .seat { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .seat .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seat select { width: 150px; flex: none; }
+  button { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  #moves { color: var(--muted); font-size: .9rem; margin-top: 12px; }
+  #log { margin: 0; padding: 0; list-style: none; max-height: 220px; overflow-y: auto; font-size: .88rem; }
+  #log li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border); }
+  #log li .dot { width: 10px; height: 10px; }
+  #rules { white-space: pre-wrap; font-size: .92rem; margin: 0; }
+  #error { display: none; max-width: 1240px; margin: 0 auto 12px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Game</h1>
+  <div id="players"></div>
+</header>
+<div id="error"></div>
+<main>
+  <section id="stage" class="card">
+    <div id="status"></div>
+    <div id="board"></div>
+    <div id="curtain"><p id="curtain-text"></p><button id="reveal" class="primary">Show my view</button></div>
+  </section>
+  <aside>
+    <div class="card">
+      <div id="count-row"><label for="count">Players</label><select id="count"></select></div>
+      <div id="seats"></div>
+      <div class="row">
+        <button id="undo">Undo</button>
+        <button id="restart" class="primary">Restart</button>
+      </div>
+      <div id="moves"></div>
+    </div>
+    <div class="card">
+      <span class="label">Moves</span>
+      <ul id="log"></ul>
+    </div>
+    <div class="card">
+      <span class="label">Rules</span>
+      <p id="rules"></p>
+    </div>
+  </aside>
+</main>
+
+<script>
+// GameKit: shared helpers available to every game.js. All randomness goes through a
+// seed kept in the game state, so applyMove stays deterministic (needed for undo and AI).
+window.GameKit = (function () {
+  const SUITS = { S: "♠", H: "♥", D: "♦", C: "♣" };
+  const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  let backId = 0;
+
+  // mulberry32: returns [float in [0, 1), nextSeed]
+  function random(seed) {
+    const next = (seed + 0x6d2b79f5) | 0;
+    let t = next;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return [((t ^ (t >>> 14)) >>> 0) / 4294967296, next];
+  }
+  function randInt(seed, n) {
+    const [r, next] = random(seed);
+    return [Math.floor(r * n), next];
+  }
+  function shuffle(array, seed) {
+    const a = array.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      let j;
+      [j, seed] = randInt(seed, i + 1);
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return [a, seed];
+  }
+  function rollDice(seed, count = 1, sides = 6) {
+    const values = [];
+    for (let i = 0; i < count; i++) {
+      let v;
+      [v, seed] = randInt(seed, sides);
+      values.push(v + 1);
+    }
+    return [values, seed];
+  }
+
+  // Playing cards are strings like "AS", "10H", "QD", "JK1" (jokers).
+  function standardDeck({ jokers = 0 } = {}) {
+    const deck = [];
+    for (const s of Object.keys(SUITS)) for (const r of RANKS) deck.push(r + s);
+    for (let i = 1; i <= jokers; i++) deck.push("JK" + i);
+    return deck;
+  }
+  const isJoker = (card) => card.startsWith("JK");
+  const cardSuit = (card) => (isJoker(card) ? null : card.slice(-1));
+  const cardRank = (card) => (isJoker(card) ? 0 : RANKS.indexOf(card.slice(0, -1)) + 1); // A=1 … K=13
+  const cardLabel = (card) => (isJoker(card) ? "Joker" : card.slice(0, -1) + SUITS[cardSuit(card)]);
+
+  function cardSVG(card, { width = 70, faceDown = false, highlight = false } = {}) {
+    const h = Math.round(width * 1.4), stroke = highlight ? "#f5b400" : "#9aa0aa", sw = highlight ? 4 : 1.5;
+    const frame = `<rect x="1" y="1" width="${width - 2}" height="${h - 2}" rx="${width * 0.1}" `;
+    if (faceDown || !card) {
+      const id = "gkback" + ++backId; // unique per card so removing one never breaks another
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">` +
+        `<defs><pattern id="${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">` +
+        `<rect width="8" height="8" fill="#2b4c9b"/><rect width="4" height="8" fill="#3a5fb8"/></pattern></defs>` +
+        `${frame}fill="url(#${id})" stroke="${stroke}" stroke-width="${sw}"/>` +
+        `<rect x="${width * 0.12}" y="${width * 0.12}" width="${width * 0.76}" height="${h - width * 0.24}" rx="4" fill="none" stroke="#fff" stroke-opacity=".5"/></svg>`;
+    }
+    const suit = cardSuit(card);
+    const color = isJoker(card) ? "#7b2cbf" : suit === "H" || suit === "D" ? "#d1242f" : "#1f2328";
+    const corner = isJoker(card) ? "★" : card.slice(0, -1);
+    const pip = isJoker(card) ? "★" : SUITS[suit];
+    const f = width / 70;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">` +
+      `${frame}fill="#fff" stroke="${stroke}" stroke-width="${sw}"/>` +
+      `<g fill="${color}" font-family="Georgia, serif" font-weight="bold">` +
+      `<text x="${6 * f}" y="${18 * f}" font-size="${15 * f}">${corner}</text>` +
+      `<text x="${6 * f}" y="${32 * f}" font-size="${13 * f}">${pip}</text>` +
+      `<text x="${width / 2}" y="${h / 2 + 12 * f}" font-size="${34 * f}" text-anchor="middle">${pip}</text>` +
+      `<g transform="rotate(180 ${width / 2} ${h / 2})"><text x="${6 * f}" y="${18 * f}" font-size="${15 * f}">${corner}</text></g>` +
+      `</g></svg>`;
+  }
+
+  function dieSVG(value, { size = 48, color = "#fff", pipColor = "#1f2328" } = {}) {
+    const P = { 1: [[2, 2]], 2: [[1, 1], [3, 3]], 3: [[1, 1], [2, 2], [3, 3]], 4: [[1, 1], [3, 1], [1, 3], [3, 3]],
+      5: [[1, 1], [3, 1], [2, 2], [1, 3], [3, 3]], 6: [[1, 1], [3, 1], [1, 2], [3, 2], [1, 3], [3, 3]] }[value] || [];
+    const pips = P.map(([x, y]) => `<circle cx="${x * size / 4}" cy="${y * size / 4}" r="${size / 11}" fill="${pipColor}"/>`).join("");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
+      `<rect x="1" y="1" width="${size - 2}" height="${size - 2}" rx="${size / 6}" fill="${color}" stroke="#9aa0aa"/>${pips}` +
+      (P.length ? "" : `<text x="${size / 2}" y="${size * 0.64}" font-size="${size / 2.4}" text-anchor="middle" fill="${pipColor}">${value}</text>`) +
+      `</svg>`;
+  }
+
+  const newSeed = () => (Math.random() * 4294967296) | 0;
+
+  return { random, randInt, shuffle, rollDice, newSeed, standardDeck, cardSuit, cardRank, cardLabel, isJoker, cardSVG, dieSVG, SUITS };
+})();
+</script>
+
+<!-- The generated game: defines window.GameEngine and window.GameView. -->
+<script src="game.js"></script>
+
+<script>
+// Shell: owns the game loop, seats, hidden-information handling, and computer opponents.
+// It only talks to the game through window.GameEngine and window.GameView.
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const errorBox = $("error");
+  function showError(message) {
+    errorBox.style.display = "block";
+    errorBox.textContent += (errorBox.textContent ? "\n" : "") + message;
+  }
+  window.addEventListener("error", (e) => showError(e.error?.stack || e.message));
+
+  const engine = window.GameEngine;
+  const view = window.GameView;
+  if (!engine || !view) {
+    showError("game.js must define window.GameEngine and window.GameView.");
+    return;
+  }
+
+  const minPlayers = engine.minPlayers ?? engine.players;
+  const maxPlayers = engine.maxPlayers ?? engine.players;
+  const defaultPlayers = engine.players ?? minPlayers;
+  const PALETTE = ["#e5484d", "#3b6fd8", "#f5b400", "#2fa36b", "#9b51e0", "#f07c2a", "#14a3b8", "#d6409f"];
+  const names = Array.from({ length: maxPlayers }, (_, i) => engine.playerNames?.[i] || `Player ${i + 1}`);
+  const colors = Array.from({ length: maxPlayers }, (_, i) => engine.playerColors?.[i] || PALETTE[i % PALETTE.length]);
+  const CONTROLLERS = [["human", "Human"], ["mcts", "Computer (strong)"], ["random", "Computer (random)"]];
+  document.title = engine.name;
+  $("title").textContent = engine.name;
+  $("rules").textContent = engine.rules || "";
+
+  let numPlayers = defaultPlayers;
+  let seats = [];
+  let state, history, log, lastMove, pending, generation = 0;
+  let shownViewer = null; // whose private view is on screen in hot-seat games
+
+  const json = (x) => JSON.stringify(x);
+  const humans = () => seats.map((s, i) => (s === "human" ? i + 1 : 0)).filter(Boolean);
+  const isComputer = (p) => seats[p - 1] !== "human";
+
+  // ---- Setup controls ----
+  $("count").innerHTML = Array.from({ length: maxPlayers - minPlayers + 1 }, (_, i) =>
+    `<option value="${minPlayers + i}">${minPlayers + i} players</option>`).join("");
+  $("count").value = String(defaultPlayers);
+  $("count-row").style.display = minPlayers === maxPlayers ? "none" : "";
+
+  function buildSeats() {
+    seats = Array.from({ length: numPlayers }, (_, i) => seats[i] || (i === 0 ? "human" : "mcts"));
+    $("players").innerHTML = seats.map((_, i) =>
+      `<div class="chip" data-player="${i + 1}"><span class="dot" style="background:${colors[i]}"></span>${names[i]}</div>`).join("");
+    $("seats").innerHTML = seats.map((s, i) => `<div class="seat"><span class="dot" style="background:${colors[i]}"></span>` +
+      `<span class="name">${names[i]}</span><select data-seat="${i}">` +
+      CONTROLLERS.map(([v, t]) => `<option value="${v}"${v === s ? " selected" : ""}>${t}</option>`).join("") +
+      `</select></div>`).join("");
+    $("seats").querySelectorAll("select").forEach((sel) => sel.addEventListener("change", () => {
+      seats[Number(sel.dataset.seat)] = sel.value;
+      generation++;
+      pending = false;
+      afterChange();
+    }));
+  }
+
+  // ---- Perspective: which player's private information is shown ----
+  function snapshot() {
+    const result = engine.result(state) || null;
+    const player = result ? null : engine.currentPlayer(state);
+    const hs = humans();
+    let viewer = null;
+    if (engine.hidden && !result && hs.length) {
+      viewer = hs.length === 1 ? hs[0] : !isComputer(player) ? player : shownViewer ?? hs[0];
+    }
+    const curtain = !!(engine.hidden && !result && hs.length > 1 && viewer !== shownViewer);
+    const legalMoves = result ? [] : engine.legalMoves(state);
+    return {
+      result, player, viewer, curtain,
+      // In hidden-information games only the viewer may see their own options.
+      legalMoves: !engine.hidden || viewer === null || viewer === player ? legalMoves : [],
+      canMove: !result && !isComputer(player) && !pending && !curtain,
+      lastMove, players: numPlayers, allLegalMoves: legalMoves,
+    };
+  }
+
+  function resultText(result) {
+    const scores = result.scores ? "  ·  " + result.scores.map((s, i) => `${names[i]} ${s}`).join(", ") : "";
+    if (result.winners?.length) return `${result.winners.map((w) => names[w - 1]).join(" & ")} win!${scores}`;
+    if (result.winner == null) return `Draw!${scores}`;
+    return `${names[result.winner - 1]} wins!${scores}`;
+  }
+
+  function render() {
+    const info = snapshot();
+    const shown = engine.hidden && info.viewer !== null ? engine.observe(state, info.viewer) : state;
+    const { allLegalMoves, curtain, ...viewInfo } = info;
+    board.update(shown, viewInfo);
+    $("board").style.visibility = curtain ? "hidden" : "";
+    $("curtain").classList.toggle("up", curtain);
+    if (curtain) $("curtain-text").textContent = `Pass the device to ${names[info.viewer - 1]}`;
+    document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", Number(c.dataset.player) === info.player));
+    const status = $("status");
+    status.classList.toggle("over", !!info.result);
+    status.textContent = info.result ? resultText(info.result)
+      : isComputer(info.player) ? `${names[info.player - 1]} is thinking…` : `${names[info.player - 1]} to move`;
+    $("moves").textContent = `Move ${history.length}`;
+    $("undo").disabled = !history.length || !humans().length;
+    $("log").innerHTML = log.slice(-200).map(({ player, text }) =>
+      `<li><span class="dot" style="background:${colors[player - 1]}"></span><span>${text}</span></li>`).join("");
+    $("log").scrollTop = $("log").scrollHeight;
+    return info;
+  }
+
+  function describe(before, move) {
+    try { return engine.describeMove ? String(engine.describeMove(before, move)) : json(move); }
+    catch { return json(move); }
+  }
+
+  function apply(move) {
+    const player = engine.currentPlayer(state);
+    history.push({ state, logLength: log.length });
+    log.push({ player, text: describe(state, move) });
+    state = engine.applyMove(state, move);
+    lastMove = move;
+    afterChange();
+  }
+
+  function afterChange() {
+    const info = render();
+    if (!info.result && isComputer(info.player) && !pending) scheduleComputer();
+  }
+
+  // Called by the view when a human picks a move; ignores anything illegal or out of turn.
+  function play(move) {
+    const info = snapshot();
+    if (!info.canMove) return false;
+    const legal = info.legalMoves.find((m) => json(m) === json(move));
+    if (legal === undefined) return false;
+    apply(legal);
+    return true;
+  }
+
+  function reveal() {
+    const info = snapshot();
+    if (info.curtain) { shownViewer = info.viewer; render(); }
+  }
+
+  function scheduleComputer() {
+    const gen = generation;
+    pending = true;
+    const kind = seats[engine.currentPlayer(state) - 1];
+    setTimeout(() => {
+      if (gen !== generation) return;
+      const moves = engine.legalMoves(state);
+      const move = kind === "random" ? moves[Math.floor(Math.random() * moves.length)] : mctsMove(state, 900);
+      pending = false;
+      if (gen === generation) apply(move);
+    }, kind === "random" ? 400 : 80);
+  }
+
+  // Rewards in [0, 1] for each player from a finished (or cut-off) game.
+  function rewards(s, result) {
+    const r = Array(numPlayers).fill(0);
+    if (result) {
+      const winners = result.winners?.length ? result.winners : result.winner != null ? [result.winner] : null;
+      if (winners) winners.forEach((w) => { r[w - 1] = 1 / winners.length; });
+      else r.fill(1 / numPlayers);
+    } else if (engine.evaluate) {
+      const e = engine.evaluate(s);
+      for (let i = 0; i < numPlayers; i++) r[i] = Math.min(1, Math.max(0, Number(e?.[i]) || 0));
+    } else {
+      r.fill(1 / numPlayers);
+    }
+    return r;
+  }
+
+  // Information-set Monte Carlo tree search. Each iteration re-deals everything the searching
+  // player cannot see (GameEngine.determinize), so the computer never peeks at hidden cards
+  // or future dice. Without hidden information it is ordinary UCT.
+  function mctsMove(rootState, budgetMs = 900) {
+    const me = engine.currentPlayer(rootState);
+    const rootMoves = engine.legalMoves(rootState);
+    if (rootMoves.length === 1) return rootMoves[0];
+    const deadline = performance.now() + budgetMs;
+    const newNode = (mover) => ({ mover, children: new Map(), visits: 0, avail: 0, reward: 0 });
+    const root = newNode(null);
+    for (let i = 0; i < 1 || (i < 100000 && performance.now() < deadline); i++) {
+      let s = engine.hidden ? engine.determinize(rootState, me) : rootState;
+      let node = root;
+      const path = [root];
+      let result = engine.result(s);
+      while (!result) {
+        const moves = engine.legalMoves(s);
+        if (!moves.length) break;
+        const mover = engine.currentPlayer(s);
+        const keyed = moves.map((m) => [json(m), m]);
+        const untried = keyed.filter(([k]) => !node.children.has(k));
+        if (untried.length) {
+          const [k, m] = untried[Math.floor(Math.random() * untried.length)];
+          const child = newNode(mover);
+          child.avail = 1;
+          node.children.set(k, child);
+          s = engine.applyMove(s, m);
+          path.push((node = child));
+          break;
+        }
+        let best = null, bestMove = null, bestScore = -Infinity;
+        for (const [k, m] of keyed) {
+          const c = node.children.get(k);
+          c.avail++;
+          const score = c.reward / c.visits + 1.2 * Math.sqrt(Math.log(c.avail) / c.visits);
+          if (score > bestScore) { bestScore = score; best = c; bestMove = m; }
+        }
+        s = engine.applyMove(s, bestMove);
+        path.push((node = best));
+        result = engine.result(s);
+      }
+      result = engine.result(s);
+      for (let depth = 0; !result && depth < 200; depth++) {
+        const moves = engine.legalMoves(s);
+        if (!moves.length) break;
+        s = engine.applyMove(s, moves[Math.floor(Math.random() * moves.length)]);
+        result = engine.result(s);
+      }
+      const r = rewards(s, result);
+      for (const n of path) {
+        n.visits++;
+        if (n.mover !== null) n.reward += r[n.mover - 1];
+      }
+    }
+    let bestMove = rootMoves[0], most = -1;
+    for (const m of rootMoves) {
+      const c = root.children.get(json(m));
+      if (c && c.visits > most) { most = c.visits; bestMove = m; }
+    }
+    return bestMove;
+  }
+
+  function restart() {
+    generation++;
+    pending = false;
+    state = engine.initialState(numPlayers);
+    history = [];
+    log = [];
+    lastMove = null;
+    shownViewer = null;
+    afterChange();
+  }
+
+  function undo() {
+    if (!history.length) return;
+    generation++;
+    pending = false;
+    // Step back to the most recent position where a human was to move.
+    let entry;
+    do { entry = history.pop(); } while (history.length && isComputer(engine.currentPlayer(entry.state)));
+    state = entry.state;
+    log.length = entry.logLength;
+    lastMove = null;
+    afterChange();
+  }
+
+  function configure({ players = numPlayers, seats: newSeats } = {}) {
+    numPlayers = Math.min(maxPlayers, Math.max(minPlayers, players));
+    $("count").value = String(numPlayers);
+    if (newSeats) seats = newSeats.slice(0, numPlayers);
+    buildSeats();
+    restart();
+  }
+
+  $("restart").addEventListener("click", restart);
+  $("undo").addEventListener("click", undo);
+  $("reveal").addEventListener("click", reveal);
+  $("count").addEventListener("change", () => configure({ players: Number($("count").value) }));
+
+  const board = view.mount($("board"), { play, engine, names, colors, kit: window.GameKit });
+  // Exposed for the headless validator and for debugging in the browser console.
+  window.GameShell = {
+    play, restart, undo, reveal, configure,
+    getState: () => state,
+    get numPlayers() { return numPlayers; },
+    mctsMove, // (state, budgetMs) => move chosen by the computer for the player to move
+  };
+  configure({ players: defaultPlayers });
+})();
+</script>
+</body>
+</html>
