@@ -1,15 +1,18 @@
 {
-  "name": "ludii-gen",
+  "name": "platformer-gen",
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build:bridge": "node ludiiRunner.js --build",
-    "run:lud": "node ludiiRunner.js",
-    "gen": "node pipeline.js"
+    "login": "codex login",
+    "login:status": "codex login status",
+    "gen": "node pipeline.js",
+    "validate": "node htmlRunner.js",
+    "browser:install": "playwright install chromium",
+    "test": "node --test repairLoop.test.js htmlRunner.test.js codexGenerator.test.js designWorkflow.test.js traversal.test.js"
   },
   "dependencies": {
-    "@langchain/core": "^1.2.17",
-    "@langchain/openai": "^1.6.2",
-    "dotenv": "^18.0.8"
+    "@openai/codex-sdk": "^0.166.0",
+    "dotenv": "^18.0.8",
+    "playwright": "^1.64.1"
   }
 }

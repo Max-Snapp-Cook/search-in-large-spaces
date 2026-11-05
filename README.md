@@ -1,232 +1,153 @@
-﻿# Search in Large Spaces
+# Search in Large Spaces
 
-A command-line prototype for generating board games with Gemini and checking them with the Ludii game engine. Give it a game idea, and it writes plain-English rules, translates those rules into a `.lud` game description, and asks the model to fix code that fails engine validation.
-
-The current project explores game ideas through generation and repair. It does not yet rank games, evaluate how fun or balanced they are, or have LLM agents play against each other.
-
-## How it works
-
-```text
-Game idea + reference games in examples/
-                  |
-                  v
-        Gemini writes English rules
-                  |
-                  v
-        Gemini translates rules to .lud
-                  |
-                  v
-        Java bridge checks the game <---------+
-                  |                           |
-          +-------+--------+                  |
-          |                |                  |
-        Pass          Game error              |
-          |                |                  |
-     Save game.lud    Gemini repairs code ----+
-                      (up to MAX_REPAIRS)
-```
-
-Ludii is the game engine used here. A `.lud` file describes a game's board, pieces, setup, moves, and ending conditions using building blocks called *ludemes*. The JavaScript code coordinates generation; the Java bridge lets it compile and run games in Ludii without opening a graphical window.
-
-Install dependencies with `npm install`. Copy `.env.example` to `.env` (or add
-the settings to your existing `.env`) and set `GEMINI_API_KEY` to a key from
-[Google AI Studio](https://aistudio.google.com/apikey).
-Optionally set `GEMINI_MODEL`; the default is `gemini-3.8-flash`.
-
-1. Read every `.lud` file directly inside `examples/`. The supplied references are Chess, Go, Shogi, and Tic-Tac-Toe.
-2. Use `rulesPrompt` to turn the idea into complete English rules.
-3. Use `translatePrompt` to convert those rules into Ludii code. The prompt asks the model to use only ludemes found in the references; this is a model instruction, not an enforced whitelist.
-4. Save the rules and first code attempt, then launch Java to compile the game, initialize its starting state, and generate its initial legal moves.
-5. If a game error occurs, send the original rules, reference games, latest code, and engine feedback to `repairPrompt`. Save and validate each revision until one passes or the repair limit is reached.
-
-All three prompts use the same Gemini model through LangChain's `ChatOpenAI` client and Gemini's OpenAI-compatible endpoint. Despite the client name, this project uses a Gemini API key, not an OpenAI API key.
+Generate distinctive, self-contained HTML/JavaScript platformers with Codex using your ChatGPT sign-in. The backend interviews the user when necessary, compares design alternatives, writes an implementation contract, tests actual behavior in Chromium, and repairs deviations from the requested experience.
 
 ## Setup
 
-Run the commands below from the repository root.
-
-You need:
-
-- **Node.js 22 or newer and npm**, as required by the locked dependencies.
-- **A Java JDK**, with both `java` and `javac` available on `PATH`. Use a matching compiler and runtime compatible with the supplied Ludii JAR.
-- **`Ludii.jar`**, included at the repository root. An alternative location can be configured with `LUDII_JAR`.
-- **A Gemini API key and network access** to generate or repair games. Local validation and the Node tests do not require an API key.
-
-Python and a Python virtual environment are not used by this project.
-
-Install the JavaScript dependencies:
+Use Node.js 22 or newer:
 
 ```sh
 npm ci
+npm run browser:install
+npm run login
+npm run login:status
 ```
 
-Create a file named `.env` in the repository root with:
+Choose ChatGPT sign-in. The official Codex SDK uses the saved Codex login and your plan's Codex allowance. No API key is needed. See [OpenAI authentication guidance](https://learn.chatgpt.com/docs/auth) and the [Codex SDK documentation](https://learn.chatgpt.com/docs/codex-sdk).
 
-```dotenv
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-2.5-flash
-MAX_REPAIRS=5
-```
-
-Only `GEMINI_API_KEY` is required for generation. The other two values shown are the defaults. `.env` is ignored by Git.
-
-Build the Java bridge, then check the supplied Tic-Tac-Toe game:
-
-```sh
-npm run build:bridge
-npm run run:lud -- examples/tic-tac-toe.lud
-```
-
-A successful check prints JSON containing `"ok": true` and `"stage": "complete"`. Build the bridge before generating games, and rebuild it after changing `LudiiBridge.java` or replacing the JAR. The generated `LudiiBridge.class` file is ignored by Git.
-
-### Configuration
-
-| Setting | Default | Purpose |
-| --- | --- | --- |
-| `GEMINI_API_KEY` | None | Required for generation and repair requests. |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Model used by all three prompt chains. |
-| `MAX_REPAIRS` | `5` | Maximum repairs after the initial attempt; must be a nonnegative integer. `0` validates once without repairs. |
-| `LUDII_JAR` | `Ludii.jar` at the repository root | Path to the engine JAR. |
-| `JAVA_BIN` | `java` | Java runtime executable name or full path. |
-| `JAVAC_BIN` | `javac` | Java compiler executable name or full path. |
-
-For example, custom Windows paths can be added to `.env` as:
-
-```dotenv
-LUDII_JAR="C:/tools/Ludii.jar"
-JAVA_BIN="C:/path/to/jdk/bin/java.exe"
-JAVAC_BIN="C:/path/to/jdk/bin/javac.exe"
-```
+Optional `.env` settings are shown in `.env.example`: `MAX_REPAIRS` defaults to 15 (16 validation attempts including the initial version), `GENERATION_TIMEOUT_MS` defaults to 1800000 (30 minutes) per model request; set it to 0 to disable the local deadline, and `CODEX_MODEL` optionally overrides your Codex default. The CLI prints an elapsed-time heartbeat every 30 seconds while a model request is running. Local timeouts, cancellation, authentication failures and explicit usage/rate-limit errors have distinct messages. A local abort does not by itself indicate an exhausted plan. Increase the timeout for longer implementations. Each stage and repair makes additional model requests; this workflow prioritizes quality over request count or latency.
 
 ## Generate a game
 
-Pass the idea as one quoted argument:
-
-```sh
-npm run gen -- "a two-player capture game on a hexagonal board"
+```powershell
+npm run gen -- "A precision platformer with wall jumps and a rechargeable air dash. No combat. Short rooms with instant retries."
 ```
 
-Running `npm run gen` without an idea uses that same example idea. The pipeline prints the generated rules, initial code, repair progress, and successful output path.
+In an interactive terminal, the model asks focused questions if important design choices are unclear. Enter an option number or a free-text answer. You can explicitly delegate a choice, or enter `:pause` to return later. Answers already entered in the current batch are saved in `answers.draft.json`; completed batches are saved in `session.json`.
 
-Each run makes two initial model requests: one for rules and one for code. Each repair adds another request. With the default repair limit, there can be up to six validation attempts and seven model requests. Reference games and generated content are sent to Gemini as part of those requests.
+Questions cover decisions that change implementation: movement feel and abilities, combat and opponents, world structure, failure/recovery, progression and objectives. They are generated from the actual brief, not a fixed questionnaire. Mechanically detailed requests can proceed without questions; themes alone usually need clarification. Answers become part of the authoritative brief. Already answered questions cannot be repeated under the same ID, and previously extracted requirements cannot silently disappear in later interview rounds.
 
-### Output files
+## Questions as output and resuming
 
-After the initial rules and code have been generated, the pipeline creates a unique directory under `outputs/`, named with a timestamp and a random suffix:
+For scripts, IDE tasks or when you want to answer outside the terminal:
+
+```powershell
+npm run gen -- "A platformer about a flooded clockwork city" --non-interactive
+```
+
+If clarification is needed, generation stops successfully with `status: awaiting_answers`, without producing a game. The run contains `questions.md`, `questions.json` and `answers.template.json`, and the terminal prints the exact resume command. Edit the template or create a separate JSON file mapping question IDs to answers, for example:
+
+```json
+{
+  "movement": "Swim with inertia underwater, but jump normally on dry platforms.",
+  "failure": "Instant retries at the current room's checkpoint."
+}
+```
+
+Use the actual IDs from your run; every pending question needs a nonempty answer. Then:
+
+```powershell
+npm run gen -- --resume "outputs/<run>" --answers "outputs/<run>/answers.template.json"
+```
+
+A later round may ask new questions if an answer introduces an important ambiguity. The pipeline never treats missing answers as permission to invent decisions. To resume an interactive interview, use `--resume` without `--answers`. Runs interrupted while writing the design reuse the completed interview and saved answers when resumed. Runs with a completed design but failed implementation can also be resumed without answers; a new build preserves all earlier attempts. A validated run is finished: start a new run to generate another game or change the brief.
+
+## How variety and fidelity are handled
+
+1. **Grounded requirements.** Extract explicit constraints with exact quotes from the user's idea and answers. Separate assumptions from requirements and ask about consequential ambiguity.
+2. **Design exploration.** Compare three mechanically different approaches consistent with the brief. Select by user intent, not random mechanics. Choose specific movement tuning, combat or no combat, world structure, failure rules, progression and visual feedback. The only fixed genre constraint is meaningful 2D platforming; arenas, precision rooms, exploration, combat runs and local multiplayer are possible.
+3. **History-aware design.** Supply mechanical identities from up to eight recent design contracts in `outputs/` so the model can avoid falling back to its last template. Explicit requests take priority over novelty. Older HTML-only runs are skipped. No external corpus or cross-user history is used.
+4. **Implementation contract.** Preserve requirement IDs/text verbatim and specify their implementation and observable acceptance behavior. Define interacting signature mechanics, concrete level geometry, controls, state architecture and reproducible behavioral tests. Invalid/incomplete structured model responses are retried up to twice and archived; they never silently fall back to a generic game.
+5. **Real browser behavior.** Serve each candidate over loopback HTTP and check HTML structure, JavaScript/runtime/console/resource errors. Run the design's own controls and tests rather than a fixed ArrowRight/Space sequence. Require movement, signature-mechanic and recovery scenarios, with every signature mechanic linked to a test.
+6. **Fidelity review and repair.** After browser checks pass, a fresh model request inspects the actual code and browser evidence against every requirement and signature mechanic. Missing features, generic substitutions and blocking playability issues go into the same repair loop as runtime errors. Traversal witnesses are also mandatory (see below). Only a candidate passing startup, behavioral, traversal and fidelity checks is published as `game.html`.
+
+All art, CSS, scripts and level data remain inline. No libraries, CDN, build step or network assets are allowed. Controls, game structure and objective follow the contract; the backend no longer imposes a single-player collect-coins-and-reach-a-flag course.
+
+## Browser test interface
+
+Generated games expose `window.__gameTest.snapshot()`, returning a fresh JSON-serializable copy of real live game state. It includes a frame `tick`, primary `player` state and custom ability/world/match fields used by the contract's tests. The function must not mutate state or fabricate feature flags. Normal play uses the same logic and starts without a test harness.
+
+Tests use a small validated data format: keyboard `press`, `hold`, `down`, `up`, `wait`, and snapshot `assert` steps. Input actions accept either `key` or simultaneous `keys`, never both. Controls should list alternatives separately and use `keys` arrays for modifier chords. Explicit model display notation such as `ArrowRight / KeyD` is normalized into separate bindings; `ShiftLeft + KeyR` becomes a chord. Test actions must choose a concrete binding; undeclared keys and ambiguous slash-separated test inputs remain errors. `hold` releases its temporary keys at the end; sequential holds do not overlap. Use `keys: ["ArrowRight", "KeyF"]` to move and fire together, or `down`/`up` to hold an input across other actions. Temporary holds preserve inputs already held by `down`. Assertions compare actual fields using `eq`, `ne`, `gt`, `gte`, `lt`, `lte` or `changed` from the initial snapshot. Each scenario uses an independent browser context, fresh page and paused Playwright virtual clock, installed before game scripts. Only `hold`, `press` (50ms) and `wait` advance timers and animation frames; assertions and automation overhead consume no game time. Real keyboard events still go through the game input handlers. RAF/fixed-step quantization still applies, so test thresholds need sensible margins. For later-level scenarios, declare `levelId` matching the design traversal plan. The runner calls `__gameTest.reset({levelId})`, verifies `snapshot().traversal.levelId`, then performs normal keyboard/RAF testing. This fixture must use legitimate level-entry state and dismiss title/pause panels. It does not establish that the player can reach that level: independent traversal witnesses still start at the true campaign entry. Tests without `levelId` exercise normal entry and must include any Enter/start input themselves. Zero-tick failures include a stalled-simulation diagnostic. No assertion tolerances are silently widened and failed checks are not retried until they happen to pass. No model-authored test code is evaluated. Timed actions are limited to two seconds each and twenty seconds total; full generation validation has a 120-second browser budget. Results retain before/after snapshots (including failures), each step, held inputs, elapsed virtual time, and the exact failed step. Repair prompts receive this evidence, not just an error string. The code reviewer also checks that instrumentation and tests represent real mechanics.
+
+Standalone validation now requires traversal evidence by default:
+
+```powershell
+npm run validate -- "outputs/<run>/game.html"
+```
+
+This command runs startup and traversal replay against the runtime geometry inventory. Add `--design "outputs/<run>/design.json"` to cross-check the exact level/seed inventory against the design. `--smoke-only` explicitly runs only legacy startup checks and reports that reachability was not checked. Full design-specific behavioral tests and model fidelity review run through generation/resumption.
+
+## Output files
+
+Each new request creates a unique directory under `outputs/`:
 
 ```text
 outputs/<timestamp>-<suffix>/
-  rules.md             Original English rules
-  attempt-0.lud        Initial generated code
-  attempt-0.json       Validation result for that code
-  attempt-1.lud        First repair, if needed
-  attempt-1.json       Validation result for the first repair
-  ...
-  result.json          Latest status and validation result
-  game.lud             Final code, written only after successful validation
+  idea.txt
+  session.json                 # original idea, answers, interview phase
+  interview-0.json             # grounded requirements and questions
+  interview-0.response-0.txt    # raw model response (all attempts kept)
+  questions.md
+  questions.json               # current pending questions, empty after design lock
+  answers.template.json
+  answers.draft.json           # if answers were entered interactively
+  design.json                  # locked contract, candidates, mechanics, tests
+  design-<round>.json
+  history.json                 # prior design summaries sent to the model
+  rules.md                     # readable design summary
+  result.json                  # awaiting_answers/generating/validated/failure status
+  game.html                    # only after behavior and fidelity checks pass
+  build-<timestamp>-<suffix>/
+    attempt-0.html
+    attempt-0.browser.json     # runtime and behavioral evidence
+    attempt-0.json             # combined validation result
+    review-0.json              # per-requirement/mechanic fidelity assessment
+    review-0.response-0.txt
+    ...
+    result.json
+    game.html
 ```
 
-`result.json` records the number of repairs, the repair limit, the last attempt's path, and its validation result. Its status is one of:
+Every model response, invalid-response diagnostic, HTML revision and validation report is saved. Resume attempts create new build directories. CLI failures save timestamped error reports in the run directory. Generated outputs and credentials are ignored by Git.
 
-| Status | Meaning |
-| --- | --- |
-| `repairing` | The latest validation failed and a repair is being requested. |
-| `validated` | A version passed validation and was saved as `game.lud`. |
-| `repair_limit_reached` | Game errors remain after the allowed repairs. |
-| `validation_failed` | A setup, input, process, or timeout problem stopped validation. |
-| `repair_failed` | The repair callback failed, for example because an API request failed. |
+Open the final `game.html` with your IDE's Live Server or any static HTTP server.
 
-Failures exit with a nonzero code. If a run fails before the output directory is created, such as during the initial model requests, there will be no saved run report. Generated outputs are ignored by Git.
+## Completion and accessibility validation
 
-## Validate a game or run random games
+Every new design declares `traversal: {version: 1, levels: [{id: "tower", mode: "completion"}], seeds: [0]}`. Enumerate every level/room/arena. Use `completion` for a level with a goal, exit or progression objective; use `accessibility` for a genuinely open-ended arena or sandbox. Both modes require all playable standing surfaces and regions to be reached, including optional branches. Only completion mode requires a real successful finish. Authored levels use seed 0; procedural games must use a finite set of supported seeds and validate every one. Arbitrary untested procedural layouts are not certified.
 
-You can check an existing `.lud` file independently of Gemini:
+Generated HTML must include `window.__gameTest.traversal`:
+
+- `version: 1` and `fixedDt`, matching the normal game timestep.
+- `describe()`: the full level/seed inventory, derived from the actual collision registry. Each level has `id`, `mode`, `surfaces` and `regions`; every rectangle has stable `id`, `x`, `y`, `w`, `h`. Split disconnected playable parts of one collider. Walls, ceilings, scenery and hazard-only geometry are excluded, but never exclude a platform simply because it is hard to reach. Include moving lifts, unlockable bridges and secrets.
+- `routes()`: witness routes `{id, seed, steps: [{keys: ["ArrowRight", "Space"], frames: 30}, ...]}`. Each route starts from a full normal new-game spawn. Routes may branch to cover optional areas, but cannot start at an unlocked checkpoint, teleport, load saved state or skip earlier levels. A step only contains keys and frames.
+- `reset({seed})`: the real new-game reset; pause automatic simulation while the validator steps manually.
+- `step({keys})`: advance exactly one fixed physics tick through the same input edges, movement, abilities, collision, hazards and world-update functions used in normal play. No test-only assistance or easier physics. Return the real snapshot.
+
+Traversal snapshots extend the existing API with `player.w/h`, `surfaces`, `regions`, and `traversal: {levelId, completedLevels: [], recoveries: 0}`. Player snapshots include `x,y,w,h,vx,vy,onGround,alive`. Live geometry must contain every declared entry for the current level, including disabled/locked entries with zero width until usable. Coordinates reflect moving platforms and the active seed's actual layout. Completion flags come from real objective/exit logic. A normal recovery may move the player, but must not reset the monotonic physics tick.
+
+`traversal.js` replays every frame in Chromium and observes player/body rectangles against actual live geometry. Landing requires a living, grounded player whose feet overlap the platform top; merely flying past it does not count. Regions require physical overlap. All targets and completion-mode levels must be covered for every seed. This tests ceilings, collisions, ability gates, switches, moving platforms and other mechanics through the game's own simulation instead of relying on a flat-ground jump-distance estimate.
+
+The report in `attempt-N.browser.json` includes `traversal.coverage`: visited/missing surface and region IDs, successful level completions, last player positions, recovery counts and per-route tick counts. An absent route is reported as **not proven reachable**, rather than claiming mathematical impossibility. Such failures enter the repair loop. The model can correct an invalid route or adjust impossible geometry/physics, while preserving mechanics and all targets. No passing game is published before this gate succeeds. A missing API fails explicitly; it never silently falls back to startup checks.
+
+The fidelity reviewer additionally compares the geometry inventory to the code, checks that the manual step shares normal physics, and rejects omitted surfaces, fake completion, teleportation and dishonest accessibility modes. Replay proves routes for the declared levels/seeds, assuming that adapter is faithful; it is not a proof that every possible game state avoids softlocks or that an undisclosed layout exists nowhere. It also does not promise an easy jump or comfortable timing for every player. Design instructions request conservative jump margins and account for player size, ceilings, release height and moving platforms.
+
+**Existing output files:** older games, including those generated before this check, have no traversal interface and cannot be certified automatically. Regenerate them to gain this validation; existing files are not edited. A resumed unfinished legacy design gets a traversal-plan upgrade while preserving a backup of its original design. For deliberately limited startup checking of an old file:
+
+```powershell
+npm run validate -- "outputs/<old-run>/game.html" --smoke-only
+```
+
+Witness limits are 64 routes, 4000 input steps per route, 2400 ticks per step and 120000 simulated ticks overall. Validation has a 120-second browser budget. Exhausting a budget fails validation; it never counts as success. Failure reports and prior HTML attempts remain in the run directory.
+
+## Limits and tests
+
+This pipeline cannot change model pretraining or guarantee uniqueness, fun or balance. Completion/accessibility now requires replay witnesses as described above, with their declared-inventory and seed limits. Model review remains a judgment, and manual playtesting is useful for finding untested softlocks and judging movement feel. Repeated explicit requests for the same mechanics can intentionally produce similar games.
 
 ```sh
-npm run run:lud -- examples/tic-tac-toe.lud
+npm test
 ```
 
-To also run ten random games, with a limit of 500 moves per game:
+Tests cover clarification/resumption, requirement provenance and preservation, design/review contracts, history loading, bounded test actions, quality-gate repairs, and actual Chromium behavior including custom controls, impossible jumps, blocking walls, ability-assisted crossings, inaccessible side platforms, seed coverage, missing traversal support and traversal-triggered repair. Model calls in tests are mocked; browser checks run for real.
 
-```sh
-npm run run:lud -- examples/tic-tac-toe.lud 10 500
-```
-
-Replace the example path with your generated `outputs/<run-directory>/game.lud` to test that game. The optional arguments are the number of random games (default `0`) and move limit (default `500`). These are random engine playouts, not LLM-controlled players. The runner handles Windows and Unix classpath separators.
-
-The JSON report includes:
-
-| Field | Meaning |
-| --- | --- |
-| `ok` | Whether the requested checks finished without a reported error. |
-| `stage` | `complete` on success, or the stage that failed. |
-| `errors` | Reported error messages. |
-| `diagnostics` | Engine console output and stack traces, captured separately from JSON. |
-| `gameName`, `players`, `initialLegalMoves` | Game information, when validation reached those steps. |
-| `stats` | Requested and completed playouts, wins by player, draws, move-limit count, and average moves. |
-
-Only `compile`, `initialize`, and `playout` failures become model repair feedback. `setup`, `input`, `process`, and `timeout` failures stop the repair loop because changing game code is not the appropriate automatic response. Feedback includes diagnostics and is capped at 20,000 characters.
-
-Each Java build or validation process has a default 60-second timeout. For validation, that limit covers the entire process, including all requested playouts. A process timeout returns a failure without partial stats.
-
-### What passing validation means
-
-The generation command checks compilation, initialization, and initial legal-move generation. It does **not** run full games by default or require a positive initial move count.
-
-Even when random playouts are requested, hitting the move or engine turn limit is counted in `moveLimitReached` and does not by itself fail validation or trigger repairs. Completed games without a single player winner count as draws; the statistics are not a detailed team or ranking analysis.
-
-A passing result does not establish balance, novelty, fun, exact agreement with the English rules, or correct graphical rendering. The repair prompt asks the model to preserve the original rules, but rule fidelity is not checked automatically.
-
-## Where to change things
-
-| File or directory | Responsibility |
-| --- | --- |
-| [`pipeline.js`](./pipeline.js) | Command-line entry point; configures Gemini, loads examples, builds prompt chains, and starts generation and repair. |
-| [`prompts.js`](./prompts.js) | The rules, translation, and repair prompts. Start here to change the design instructions or repair guidance. |
-| [`repairLoop.js`](./repairLoop.js) | Extracts code from model responses, saves attempts, and controls validation and retries. |
-| [`ludiiRunner.js`](./ludiiRunner.js) | Builds and launches the Java bridge, enforces process limits, parses results, and selects repairable errors. |
-| [`LudiiBridge.java`](./LudiiBridge.java) | Calls the Ludii engine to compile, initialize, generate moves, and optionally run random games; emits JSON. |
-| [`examples/`](./examples/) | Reference `.lud` games included in every generation and repair prompt. Add files here to expand the reference material. |
-| [`ludiiRunner.test.js`](./ludiiRunner.test.js) | Tests result parsing, failure classification, and input/setup checks. |
-| [`repairLoop.test.js`](./repairLoop.test.js) | Tests successful validation, repair limits, saved attempts, and failure handling using mock callbacks. |
-| [`package.json`](./package.json) | Dependencies and the three npm commands. |
-
-The reusable runner also accepts options from JavaScript:
-
-```js
-import { validateWithLudii, repairFeedback } from "./ludiiRunner.js";
-
-const result = await validateWithLudii("examples/tic-tac-toe.lud", {
-  playouts: 10,
-  maxMoves: 500,
-  timeoutMs: 60_000,
-});
-
-console.log(result);
-const feedback = repairFeedback(result); // Error text for repairable failures; otherwise null.
-```
-
-`repairUntilPlayable()` in `repairLoop.js` accepts `validationOptions: { playouts: 10, maxMoves: 500 }` if you want playouts included in the generation loop. The current generation CLI does not expose those options.
-
-## Tests and troubleshooting
-
-Run both Node test files:
-
-```sh
-node --test ludiiRunner.test.js repairLoop.test.js
-```
-
-These tests do not make model requests or run actual engine playouts. To check the real Java integration, use the build and Tic-Tac-Toe commands above, followed by the random-playout command.
-
-| Problem | What to check |
-| --- | --- |
-| Missing `GEMINI_API_KEY` | Add it to `.env` in the repository root before running `gen`. |
-| Java or compiler not found | Install a JDK and check `PATH`, `JAVA_BIN`, and `JAVAC_BIN`. |
-| Missing JAR or bridge class | Check `LUDII_JAR`, then run `npm run build:bridge`. |
-| Invalid bridge response or Java version error | Read `diagnostics`, check that the JAR and JDK are compatible, and rebuild with the matching compiler. |
-| Repair limit reached | Inspect `rules.md`, the last `.lud` attempt, and its JSON feedback. Adjust the idea, prompts, or references; raise `MAX_REPAIRS` only if more attempts are useful. |
-| Validation timeout | Try fewer playouts or a lower move limit; callers of `validateWithLudii()` can also adjust `timeoutMs`. |
-
-## Possible next steps
-
-The earlier project notes describe several directions that are not implemented yet: evaluating game quality, iteratively improving rules based on critique, adding selected generated games to the references, and having agents play against each other. The current implementation provides the generation, engine validation, repair, and saved results needed to experiment with those ideas.
+Core modules: `pipeline.js` orchestrates CLI and stages; `designWorkflow.js` persists interviews and design; `designContracts.js` validates structured outputs; `prompts.js` defines design/implementation/review instructions; `playtests.js` executes behavioral scenarios; `traversal.js` verifies completion and area accessibility; `qualityReview.js` enforces fidelity; `repairLoop.js` manages attempts; `htmlRunner.js` manages Chromium and HTTP; `codexGenerator.js` handles ChatGPT-authenticated model calls.

@@ -1,59 +1,87 @@
-// prompts.js
-// Holds the prompt templates used by the pipeline.
-import { ChatPromptTemplate } from "@langchain/core/prompts";
+// Technical constraints only. Mechanics and structure come from the user's brief.
+const architecture = `Deliver one complete self-contained HTML document with inline CSS, JavaScript, art and data, a Canvas 2D renderer and a traditional JavaScript game loop. No imports, libraries, CDN, external assets, build tools or network requests. Use requestAnimationFrame and stable delta-time physics. The game must be a 2D platformer: gravity, jumping and collidable surfaces must matter to play. Everything else is a design decision: scrolling or arenas, exploration or precision, combat or none, lives or health, rooms or runs, local multiplayer or AI opponents, scoring or reaching an exit. Do not impose coins, spikes, a right-edge flag, a short linear level, fixed controls, or a single-player format unless the brief calls for them. Include readable controls, feedback, failure/recovery and restart appropriate to the design. Prefer a polished coherent playable slice over many shallow systems.`;
+const input = value => JSON.stringify(value, null, 2);
+const context = brief => `USER BRIEF (highest priority):\n${input(brief)}`;
 
-// Generate the rules from the game idea
-const rulesPrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You are a board game designer. Your games must be implementable in the Ludii game system."],
-  ["human",
-`Reference Ludii games:
-{examples}
+export function interviewPrompt({ brief }) {
+  return `You are a platformer design interviewer. ${architecture}
+${context(brief)}
+Extract explicit user requirements and identify missing decisions that materially change the experience. Preserve existing brief.requirements verbatim with the same IDs; add new IDs for requirements introduced by answers. Named references are shorthand for experience, not a request to clone art or every mechanic. Distinguish movement feel, moment-to-moment decisions, combat, failure/retry, world structure, progression, challenge and presentation. Ask only questions whose answers would lead to different code. Do not ask about something already answered. Ask about contradictions instead of silently resolving them. A vague theme usually needs questions; a mechanically precise brief may need none. Offer concrete alternatives and free-text answers, never force a genre menu or blend every reference together. If the user explicitly delegates a choice, record an assumption rather than repeatedly asking it. Maximum six questions per round; prioritize the most consequential uncertainties. Do not invent user requirements or require arbitrary extra features for novelty.
+Return ONLY JSON:
+{"requirements":[{"id":"R1","text":"specific requirement","evidence":"exact quote from the idea or an answer"}],"assumptions":["clearly labeled delegated or low-impact choices"],"questions":[{"id":"movement","question":"specific question","why":"which implementation decision this resolves","options":["concrete option","different option"]}]}
+Evidence must be an exact nonempty substring of the user's idea or answers. Questions may be empty only if enough is known to design a distinctive coherent game. IDs must be unique. Do not re-use IDs of previously answered questions.`;
+}
 
-Using these games as reference, design a new game based on this idea: {idea}
+export function designPrompt({ brief, interview, history }) {
+  return `You are a senior game designer creating a precise implementation contract. ${architecture}
+${context(brief)}
+Interview requirements and assumptions:\n${input(interview)}
+Recent generated designs (avoid repeating their mechanical defaults unless explicitly requested):\n${input(history)}
+Explore THREE mechanically different treatments consistent with this brief, not three reskins. Compare their core decisions, movement, risk/reward and implementation feasibility. Select the one best matching user intent; novelty is subordinate to explicit intent. Explain concrete differences from recent designs, and be honest if the user requested a similar experience. Do not add random mechanics or change explicit constraints to force novelty.
+Return ONLY JSON with this shape:
+{
+ "title":"game title",
+ "candidates":[{"id":"A","coreLoop":"actions and decisions","mechanicalDifference":"difference from other candidates","tradeoff":"cost/benefit for this user"}],
+ "selectedCandidate":"A",
+ "selectionReason":"why this matches the user best",
+ "identity":{"subgenre":"specific experience","movement":"feel, abilities, numerical tuning","combat":"specific system or explicitly none","world":"arena/rooms/scrolling and geometry","progression":"run/session progression","failure":"failure and recovery","presentation":"visual and feedback language"},
+ "requirements":[{"id":"R1","text":"unchanged explicit requirement","implementation":"concrete game systems implementing it","acceptance":"observable behavior proving it"}],
+ "signatureMechanics":[{"name":"distinctive mechanic","interaction":"how it changes player decisions and interacts with another system","implementation":"state, update logic and feedback"}],
+ "controls":[{"key":"ArrowRight","action":"move right"},{"key":"KeyD","action":"alternative move right"},{"keys":["ShiftLeft","KeyR"],"action":"restart campaign"}],
+ "levelPlan":"concrete geometry, dimensions, spawn, encounters, progression and reachable routes aligned with movement tuning; specify initial world state for tests",
+ "traversal":{"version":1,"levels":[{"id":"level-1","mode":"completion"}],"seeds":[0]},
+ "implementationPlan":["state model, physics/collision details, ability transitions, enemies/objectives and UI responsibilities"],
+ "assumptions":["choices not explicitly required by the user"],
+ "noveltyNotes":"specific differences from recent outputs, not a claim of universal originality",
+ "playtests":[{"id":"movement","category":"movement","mechanicNames":[],"requirementIds":["R1"],"purpose":"observable acceptance behavior","steps":[{"action":"hold","key":"ArrowRight","ms":300},{"action":"assert","path":"player.x","op":"changed"}]}]
+}
+Use exactly 3 candidates, at least 2 interacting signature mechanics, at least 3 playtests covering movement, signature mechanics and recovery, and include ALL extracted requirement IDs without changing their text. Do not replace user requirements with generic defaults. Every playtest has a category (movement, signature or recovery); include all three categories. List mechanicNames exercised by each test, covering every signature mechanic at least once. Each test starts in an isolated document with a virtual clock and an initial snapshot after 100ms. For a test targeting a later level, set levelId to an exact design.traversal level ID. The runner calls __gameTest.reset({levelId}) before the warmup and verifies snapshot.traversal.levelId. Such setup is only a unit behavior fixture, never proof of campaign traversal. Omit levelId only when testing the normal entry flow, and include any required Enter/start input explicitly. Only explicit timed actions advance simulation; assertions consume no game time. Actions: hold(key,ms) presses, waits, then RELEASES that key; press(key) holds for 50ms then releases; wait(ms) advances time without changing input. For simultaneous movement and firing use {action:"hold",keys:["ArrowRight","KeyF"],ms:1400}. Both hold and press accept either key or keys, never both. Use down(key/keys) and up(key/keys) to keep inputs held across other actions; temporary hold/press preserves previously down keys. Never assume sequential hold actions overlap. assert(path,op,value) samples once at the exact action boundary; no automatic retry or extra time is granted. Available ops: eq, ne, gt, gte, lt, lte, changed. Paths address JSON snapshots (e.g. player.x, ability.charges, match.round). A changed assertion compares with the initial snapshot; numerical comparisons use value. Each wait/hold must be 0..2000ms and total timed actions including each 50ms press across all tests <=20000ms. Test real state and observable effects, never a static boolean claiming a feature exists. Include meaningful assertions, not just frame count. Write each alternative key as its own controls entry (ArrowRight and KeyD are two entries, never the display string "ArrowRight / KeyD"). For modifier chords use {keys:["ShiftLeft","KeyR"],action:"restart"}, not a combined key label. Test inputs must use declared individual key names or keys arrays, not slash-separated display labels. Controls, test purpose and the actual key timeline must agree. Check that a test saying move while shooting actually holds both keys. Use comfortable timing margins for animation-frame quantization; never demand a transient velocity after releasing a movement key unless the game guarantees it. Keep tests reproducible, avoid random spawns or frame-perfect timing. Explain how each signature mechanic is exercised by tests. For combat/arenas include a real combat interaction test; for traversal include ability/environment interaction. Implement a small complete representative experience with quality prioritized over speed.
+The traversal plan must list EVERY playable level, room or arena, with stable IDs. Use completion mode when a win/exit/progression condition exists, accessibility mode only for genuinely open-ended arenas/sandboxes. Every mode must expose routes to all playable surfaces and regions, including optional areas. List every supported generation seed (use [0] for authored deterministic worlds, a finite verified set for procedural worlds). Do not generate untested layouts at runtime. Design conservative reachable geometry: compute jump apex and range from gravity, jump velocity, acceleration and jump release, include player dimensions and collision clearance, and account for lift timing, ceilings and ability gates. State a concrete route through every progression segment; a plausible-looking gap is not evidence of reachability.`;
+}
 
-Write complete plain-English rules: board, pieces, setup, turns, legal moves, and how the game ends.
-Use the example games as styles of games that are plausible but create a unique and creative game. Start with the game's name. No code.`],
-]);
+// Retained as a public helper for plain-text callers.
+export function rulesPrompt({ idea }) {
+  return `Describe a mechanically specific platformer based on this user brief: ${idea}\n${architecture}\nPrioritize the user's requested experience. Separate explicit requirements from assumptions. Explain movement feel, core decisions, world structure, failure, progression and signature mechanics. Do not default to a coin-collection course. Output plain English.`;
+}
 
-// Translate the rules into .lud code
-const translatePrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You translate game rules into Ludii .lud code, using only ludemes that appear in the reference games."],
-  ["human",
-`Reference Ludii games:
-{examples}
+export function translatePrompt({ rules }) {
+  return `You are implementing a designed game, not a generic platformer template. ${architecture}
+IMPLEMENTATION CONTRACT:\n${rules}
+Every requirement, signature mechanic, control and acceptance test in the contract is binding. Make the selected design's core loop playable with polished movement, readable telegraphs, responsive feedback and intentional level/encounter design. Do not simplify a combat arena, precision challenge or exploration game into a linear collect-and-exit course. Verify geometry against the actual movement values. Handle input release, restart, death and success reliably.
+Expose a small testing interface: window.__gameTest.snapshot() returning a fresh JSON-serializable copy of REAL live state, including tick (frame counter), player {x,y,vx,vy,onGround,alive}, plus the custom fields used by the contract playtests. Do not hardcode test results, fake movement or mutate game state in snapshot(). Tests must exercise real keyboard/game logic. The normal game starts without a test harness or hidden setup. If any behavior test declares levelId, implement __gameTest.reset({levelId}) using the same level-entry initialization used in campaign play, granting only abilities and state legitimately available upon reaching that level. It must dismiss title/pause panels and run normal RAF/keyboard gameplay, not leave simulation paused or in manual-step mode. snapshot().traversal.levelId must identify the actual level. Keep this behavior fixture reset separate from traversal.reset, which MUST always restart at the true campaign entry. Ensure the contract's deterministic playtests work on a freshly loaded document.
+${traversalInstructions}
+Return ONLY the complete HTML document in one fenced html code block, with DOCTYPE, html, head, body, canvas and executable inline JavaScript. No placeholders.`;
+}
 
-Rules:
-{rules}
+export function repairPrompt({ rules, code, errors }) {
+  return `Repair this game without losing its design identity. ${architecture}
+AUTHORITATIVE USER/DESIGN CONTRACT:\n${rules}
+CURRENT COMPLETE HTML:\n${code}
+BROWSER / BEHAVIORAL / DESIGN REVIEW FAILURES:\n${errors}
+${traversalInstructions}
+Fix every reported problem and inspect related systems. Preserve all explicit requirements, signature mechanics, custom controls, level structure and __gameTest.snapshot() fields. Never make tests pass by deleting a requested feature, changing assertions, faking state, or substituting a generic platformer. If a requested behavior is missing, implement it in real game logic. Return the complete corrected HTML document in one fenced html code block.`;
+}
 
-Output ONLY the .lud code inside a single \`\`\`lud code block.`],
-]);
+export function reviewPrompt({ brief, design, code, validation }) {
+  return `You are a critical implementation reviewer. A runtime-clean page can still be the wrong game. Audit the complete code against the user's intent and design contract, with special attention to requested game feel and genre. Do not approve based on labels, variable names, UI text, static feature flags, or a model's own claims.
+${context(brief)}
+DESIGN CONTRACT:\n${input(design)}
+BROWSER EVIDENCE:\n${input(validation)}
+COMPLETE IMPLEMENTATION:\n${code}
+Audit traversal evidence against actual collision and level registries. EVERY playable standing surface, optional region, level and supported seed must be inventoried and reached by replay. Treat omitted geometry, unjustified accessibility-only modes for games with objectives, fake completion flags, test-only physics, teleportation and a reset at an unlocked checkpoint as blocking issues. Compare traversal.step with the normal input/update/collision path and ensure only deterministic stepping changes. A successful replay proves only the declared state/seed coverage, not arbitrary procedural layouts or every possible game state.
+Return ONLY JSON:
+{"requirements":[{"id":"R1","met":true,"evidence":"concrete update/render/input/collision logic implementing it; mention omissions"}],"signatureMechanics":[{"name":"exact mechanic name","met":true,"evidence":"state transitions and real player consequences"}],"issues":[{"severity":"blocking","requirementId":"R1 or general","problem":"concrete missing/incorrect behavior or unacceptable visual/playability issue","fix":"specific correction"}],"experienceAssessment":"does the core loop match the requested experience, or regress into generic platforming?"}
+Cover EVERY requirement and signature mechanic exactly once. Reject shallow stubs, incomplete core loops, unreachable essential geometry, conflicting controls, broken restart, fake instrumentation, missing rules, and generic substitutions. Inspect interactions, tuning and level plan feasibility. Blocking issues must be repaired; minor polish observations use severity advisory. Do not claim human playtesting, fun or balance is proven by code inspection or short automated tests.`;
+}
 
-// Repair prompt: fixes broken .lud code using the error feedback from Ludii
-const repairPrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You repair Ludii .lud code using error feedback from Ludii, using only ludemes that appear in the reference games."],
-  ["human",
-`Reference Ludii games:
-{examples}
+export const traversalInstructions = `MANDATORY TRAVERSAL VALIDATION:
+Implement window.__gameTest.traversal = {version:1, fixedDt, describe, routes, reset, step}.
+describe() returns {seeds:[0], levels:[{id,mode,surfaces:[{id,x,y,w,h}],regions:[{id,x,y,w,h}]}]}, exactly matching design.traversal IDs/modes/seeds. Derive the surface inventory directly from actual gameplay collision/level data, including moving platforms, bridges, locked/unlockable platforms and optional reachable areas in every level. Inventory all playable standing surfaces, not just the intended critical path. Regions cover playable non-standing areas (swimming rooms, portals, goals etc). Walls/ceilings/hazard-only geometry are not standing surfaces; do not mislabel platforms to exclude them. Use stable IDs, and split disconnected exposed portions of a collider into distinct standing surfaces. Width may initially be zero for an extending/locked surface, but every surface must become reachable eventually. Do not silently omit geometry.
+reset({seed}) performs a FULL real new-game restart at the normal entry spawn, with no completion flags, unlocked progression, teleport or checkpoints. It pauses RAF simulation while validation steps manually. step({keys:["ArrowRight","Space"]}) uses the SAME input edge handling, ability rules, collision, hazards, machinery and update function as normal gameplay, advancing EXACTLY ONE fixedDt tick and returning snapshot(). Releases are represented by removing keys; [] releases all. No easier physics or test-only movement, invulnerability, noclip, goal triggers or coordinate setters. Normal RAF and keyboard controls must still work outside validation mode.
+snapshot() must additionally return player {x,y,w,h,vx,vy,onGround,alive}, surfaces and regions arrays for the CURRENT level (actual live geometry with IDs matching describe), and traversal {levelId,completedLevels:[],recoveries:0}. completedLevels comes from actual win/exit progression, not merely entering a goal area. tick is an integer increasing by one for every manual physics tick, including after ordinary recovery; only a full reset restarts tick. Both surfaces and regions arrays are required, even when empty. Include every declared entry for the current level on every tick; locked, destroyed or disabled targets retain their IDs with width zero until usable. Preserve existing behavioral-test fields.
+routes() returns 1..64 deterministic witness routes: [{id:"complete-ascent",seed:0,steps:[{keys:["ArrowRight"],frames:30},{keys:["ArrowRight","Space"],frames:35},{keys:[],frames:20}]}]. Each route starts with reset at the real entry spawn; no loading saved states, teleportation, test-only actions, or skipping early levels. Only keys and frames are allowed on a step (frames 1..2400); at most 4000 steps per route and 120000 simulated ticks total. Build routes that ACTUALLY land on every playable surface, physically enter every playable region, and complete every completion-mode level for EACH supported seed. Multiple routes may branch from fresh starts to cover optional areas. Include interaction waits for lifts, water, doors and ability acquisition. Completion in one seed is not evidence for another. The validator observes real player rectangles and live collision surfaces on every tick; naming a reachable target or returning a visited flag will not pass.
+Treat failed witnesses as actionable: first check input timing and the route, then fix impossible geometry/physics while preserving user intent. Never remove a level, secret, surface or objective from the inventory to pass. Prefer comfortable landing margins instead of theoretical maximum jumps.`;
 
-Original rules:
-{rules}
-
-Current .lud code:
-{code}
-
-Ludii error feedback:
-{errors}
-
-Fix every reported error, then review the entire game for additional syntax and compatibility errors.
-Ludii may stop at the first error, so the feedback is not a complete list of problems. Do not stop after fixing only the named token.
-Check board constructors and their arguments, direction names, site types, macro definitions and calls, move effects, scoring, ending conditions, and matching parentheses.
-Use the reference games as evidence of valid syntax and argument structure. Do not invent ludemes, direction names, or graphics styles, or substitute another unsupported token for a reported invalid token.
-Check that the chosen site types and adjacency rules are consistent across placement, capture, and territory scoring.
-Review graphics metadata separately: compilation does not guarantee that a specialized board renderer supports the chosen board geometry. Omit optional board-style overrides when compatibility is uncertain.
-Preserve the original rules as closely as possible. Make all necessary corrections, but avoid unrelated changes or replacing the game with a reference game.
-Before returning the code, check that each reported problem has been addressed and that your changes have not introduced new inconsistencies. Do not return the same failing code unchanged.
-Return the complete corrected game, not a patch or a partial snippet.
-Output ONLY the .lud code inside a single \`\`\`lud code block.`],
-]);
-
-export { rulesPrompt, translatePrompt, repairPrompt };
+export function traversalPlanPrompt({ design }) {
+  return `Upgrade this existing locked design with a traversal plan only. Preserve its level/room/arena count, objectives and mechanics. Return ONLY JSON {"version":1,"levels":[{"id":"stable-id","mode":"completion"}],"seeds":[0]}. Enumerate EVERY playable level/room/arena, using completion if it has a win/exit/progression objective, accessibility only for genuinely open-ended spaces. Use a finite list of all supported seeds, [0] for an authored world. Do not simplify the game to pass. Existing design:\n${input(design)}`;
+}

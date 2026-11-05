@@ -5,16 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import { repairUntilPlayable } from "./repairLoop.js";
 
-const failed = { ok: false, stage: "compile", errors: ["Bad syntax"], diagnostics: "Ludii details" };
+const failed = { ok: false, stage: "document", errors: ["Bad syntax"], diagnostics: "Browser details" };
 const passed = { ok: true, stage: "complete", errors: [] };
 
 async function fixture(t) {
-  const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "ludii-repair-test-"));
+  const outDir = await fs.mkdtemp(path.join(os.tmpdir(), "html-repair-test-"));
   t.after(async () => {
     for (const file of await fs.readdir(outDir)) await fs.unlink(path.join(outDir, file));
     await fs.rmdir(outDir);
   });
-  return { outDir, code: "initial", rules: "original rules", examples: "references" };
+  return { outDir, code: "initial", rules: "original rules" };
 }
 
 test("accepts the first valid game without calling repair", async (t) => {
@@ -22,7 +22,7 @@ test("accepts the first valid game without calling repair", async (t) => {
   const result = await repairUntilPlayable({ ...input, validate: async () => passed,
     repair: () => assert.fail("Unexpected repair") });
   assert.equal(result.repairs, 0);
-  assert.equal(await fs.readFile(path.join(input.outDir, "game.lud"), "utf8"), "initial");
+  assert.equal(await fs.readFile(path.join(input.outDir, "game.html"), "utf8"), "initial");
 });
 
 test("repairs the latest code with fixed rules and saves each validation", async (t) => {
@@ -32,14 +32,13 @@ test("repairs the latest code with fixed rules and saves each validation", async
     validate: async (file) => (await fs.readFile(file, "utf8")) === "fixed" ? passed : failed,
     repair: async (feedback) => {
       assert.equal(feedback.rules, input.rules);
-      assert.equal(feedback.examples, input.examples);
       assert.equal(feedback.code, calls === 0 ? "initial" : "still broken");
-      assert.match(feedback.errors, /Ludii details/);
-      return ++calls === 1 ? "still broken" : "```lud\nfixed\n```";
+      assert.match(feedback.errors, /Browser details/);
+      return ++calls === 1 ? "still broken" : "```html\nfixed\n```";
     },
   });
   assert.equal(calls, 2);
-  assert.equal(await fs.readFile(path.join(input.outDir, "game.lud"), "utf8"), "fixed");
+  assert.equal(await fs.readFile(path.join(input.outDir, "game.html"), "utf8"), "fixed");
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(input.outDir, "attempt-0.json"))), failed);
 });
 
@@ -53,7 +52,7 @@ test("limit allows exactly the requested repairs, including zero", async (t) => 
     }), /repair_limit_reached/);
     assert.equal(repairs, maxRepairs);
     assert.equal(validations, maxRepairs + 1);
-    await assert.rejects(fs.access(path.join(input.outDir, "game.lud")));
+    await assert.rejects(fs.access(path.join(input.outDir, "game.html")));
   }
 });
 
@@ -73,4 +72,17 @@ test("model failure preserves the attempted game and records failure", async (t)
   const result = JSON.parse(await fs.readFile(path.join(input.outDir, "result.json")));
   assert.equal(result.status, "repair_failed");
   assert.equal(await fs.readFile(result.lastAttempt, "utf8"), "initial");
+});
+
+test("the default budget allows 15 repairs after the initial attempt", async t => {
+  const input=await fixture(t);
+  let repairs=0,validations=0;
+  const result=await repairUntilPlayable({...input,
+    validate:async()=>{validations++;return validations===16?passed:failed;},
+    repair:async()=>{repairs++;return 'still repairing';},
+  });
+  assert.equal(repairs,15);
+  assert.equal(validations,16);
+  assert.equal(result.maxRepairs,15);
+  assert.equal(result.repairs,15);
 });
