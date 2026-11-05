@@ -3,8 +3,8 @@
 Generates board games as small websites. Every run produces a folder with `index.html` and
 `game.js`. Double-click `index.html` and the game opens in your browser; no server is needed.
 
-The flow is idea → rules → code → validate → repair, with Gemini writing the rules and the
-JavaScript, and a headless validator feeding errors back until the game works.
+The flow is idea → rules → code → validate → repair, with an LLM (BayLeaf or Gemini) writing
+the rules and the JavaScript, and a headless validator feeding errors back until the game works.
 
 ## Run the pipeline
 
@@ -14,12 +14,18 @@ npm install
 npm run gen -- "a two-player capture game on a hexagonal board"
 ```
 
-Settings are read from `html-gen/.env` first, then the repo-root `.env`. Optional settings:
+Settings are read from `html-gen/.env` first, then the repo-root `.env`. Set
+`BAYLEAF_API_KEY` or `GEMINI_API_KEY`; BayLeaf is used whenever its key is set. Optional settings:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | Model used for rules, code, and repairs |
+| `PROVIDER` | `bayleaf` if its key is set, else `gemini` | Which API writes the rules, code, and repairs |
+| `MODEL` | `openrouter:moonshotai/kimi-k3.1-pro` | BayLeaf model |
+| `BASE_URL` | `https://api.bayleaf.dev/v1` | BayLeaf endpoint |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Gemini model |
 | `MAX_REPAIRS` | `5` | Repair attempts after the first; `0` validates once |
+| `LLM_TIMEOUT` | `600` | Seconds each model reply may take to finish streaming; a reply that runs out of time is not retried (connection errors, 429s and 5xx are retried twice) |
+| `RULES` | — | Path to a `rules.md` from an earlier run; skips the rules step and writes code from it |
 | `OPEN_GAME` | on | Set to `false` to stop the finished game from opening in your browser |
 
 Each run creates `outputs/<timestamp>/` with `rules.md`, numbered `attempt-N.js` files and
