@@ -35,6 +35,12 @@ Rules:
 
 {contract}
 
+Implement agentContext, agentObservation, and describeAction as part of GameEngine. LLM players cannot see the
+rendered board or your source code: expose the complete public layout, named resources and identities, readable
+legal actions, and factual player metrics through that interface. Keep descriptions compact and player-safe.
+Include agentObservation.endgame with current ending conditions, remaining time, scoring, tiebreakers, and
+uncertainty as specified in the contract. Never invent a countdown for a conditional or hidden ending.
+
 Output ONLY the complete game.js inside a single \`\`\`javascript code block.`],
 ]);
 
@@ -63,6 +69,10 @@ mutate its input, results are valid, and (for hidden games) that determinize kee
 plays games through the shell for each player count (calling GameView update after every move, plus undo and
 restart) and clicks every element in the board container. Finally it runs the computer opponent's search from a
 few positions, which calls determinize and evaluate.
+For newly generated games it also requires agentContext, agentObservation, and describeAction. Local checks
+exercise readable descriptions for every player, sampled legal moves, and terminal states, checking response
+shapes, determinism, and non-mutation. These functions receive player-observed state with RNG seeds removed.
+Ensure the full public layout and encoding meanings are exposed, and private information stays hidden.
 
 Fix every reported error, then review the entire file for related bugs: the validator may stop at the first failure.
 Preserve the original rules as closely as possible. Make all necessary corrections, but avoid unrelated changes.

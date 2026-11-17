@@ -72,6 +72,58 @@ window.GameEngine — pure game logic with no DOM access (it is run headlessly f
   describeMove(state, move): short text for the move log, e.g. "rolled 8 and bought Oak Street". It must only
     reveal public information (say "drew a card", not which card).
 
+Required LLM-player interface on GameEngine (also pure, deterministic, JSON-serializable, no DOM/network):
+  Agents receive rules and these descriptions, NOT game.js source or the rendered board. Include ALL public
+  information needed to understand and play the game; constants hidden in a JavaScript closure are not visible.
+
+  agentContext(): returns an object with a nonempty `summary` string and the STATIC public game context.
+    Include the complete board/map or topology, locations of terrain/resources/goals, coordinate conventions,
+    class/card/resource definitions, and legends for any compact encodings. Boardless games describe their
+    zones and card/action meanings instead. Prefer a compact map with an explicit legend to verbose cell prose.
+    No state, private information, RNG seeds, or strategy advice. Do not repeat the full rules here.
+    For randomly generated layouts, put the actual public layout in agentObservation instead.
+
+  agentObservation(observed, player): receives ONLY observe(state, player) for hidden games, or a copy of state
+    otherwise, with RNG seed fields removed. Never depend on hidden values or retained full state.
+    Return an object with:
+      self: { player, name, ...named current information for this player },
+      metrics: { ...named, factual game-specific statistics for THIS player },
+      endgame: { endingConditions, remaining, scoring, tiebreakers, uncertainty },
+      ...other readable public information needed to decide now.
+    Player numbers are always 1..numPlayers, never array indices. Identify opponents explicitly by player number.
+    Use named goods/inventory fields and named classes, and make positions readable using agentContext's map.
+    Include whose decision it is, phase/round, remaining actions, restrictions already used, visible hands,
+    public objectives, opponents' public positions/resources/scores, and relevant public supply/board changes.
+    Distinguish an applicable rule limit from an exhausted allowance: expose the limit, amount used this turn,
+    and remaining allowance where relevant. Avoid ambiguous flags such as "limitActive" meaning "cannot act".
+    Any explicit current availability must agree with legalMoves; turn-scoped restrictions reset with the turn.
+    `metrics` must contain actual engine-derived facts such as score, completed orders, gates opened, or scoring
+    breakdown where relevant; use {} if no such statistics exist. Never estimate an unavailable statistic.
+    `endgame` is required for newly generated games. Its five fields are nonblank readable strings, each at
+    most 800 characters. `endingConditions` names all immediate and scheduled ending triggers; `remaining`
+    describes time remaining from the CURRENT position, specifying units, whose turns/actions, and whether
+    the current turn/round is included. Give exact counts only when determinable from public information;
+    conditional endings need an upper bound or "unknown", not an invented countdown. Do not assume
+    round-robin order or equate a round with one decision. `scoring` explains what actually counts at the end
+    (including carried vs banked resources); `tiebreakers` gives their ordered application, draws/shared wins,
+    or "none". `uncertainty` describes early-ending possibilities and unknown timing, or explicitly says none.
+    Keep these factual, including at terminal states; no strategy advice or hidden information.
+    Runner move/time budgets are NOT game-ending rules. Example remaining text:
+    "At most 3 rounds including this one; you have 1 action left this turn. A score victory can end it sooner."
+    Handle initial, interrupted-turn, eliminated-player, and terminal states. Do not include past snapshots,
+    opinions, strategy advice, hidden card identities, or seeds. Keep this compact and avoid duplicating context.
+
+  describeAction(observed, move, player): returns { label: string, category: string } for a legal move.
+    `label` (up to 500 characters) precisely describes the action and its known immediate effects/costs, e.g.
+    "Travel to West Dairy at (4,7); spend 1 action", "Fill public Sampler: pay one of each good; score 9 points",
+    or "End turn; forfeit 1 unused action". Never claim unknown dice/draw outcomes as guaranteed effects.
+    When an action has no target and acts as a pass, label it explicitly as a pass with its actual cost;
+    do not describe removing or collecting an object that is absent.
+    `category` (up to 80 characters) is a stable readable action name such as "Travel", "Fill order", "End turn".
+    Only the acting player receives this label: it may mention their own private cards but never other secrets.
+    Do not generate strategy or an explanation of WHY a player should choose it. The player supplies that.
+    This differs from describeMove(state, move), which remains a PUBLIC log description safe for opponents.
+
 window.GameView — renders the game and turns user input into moves:
   mount(container, ctx): called once. container is an empty <div> about 900px wide (it may report width 0
     when headless, so do not depend on measured sizes). ctx = { play(move), engine, names, colors, kit }.
@@ -125,6 +177,11 @@ Skeleton:
     result(state) { /* ... */ },
     evaluate(state) { /* ... */ },
     describeMove(state, move) { /* ... */ },
+    agentContext() { return { summary: "..." /* complete static public map and definitions */ }; },
+    agentObservation(observed, player) {
+      return { self: { player, name: "..." /* named inventory, position, visible hand */ }, metrics: {} /* public situation */ };
+    },
+    describeAction(observed, move, player) { return { label: "...", category: "..." }; },
   };
 
   window.GameView = {

@@ -98,6 +98,40 @@ test("a valid game reports playout stats", async (t) => {
   assert.equal(result.stats.avgBranchingPerState, 2);
 });
 
+const agentInterface = `
+  agentContext() { return { summary: "A shared counter from 0 to 5." }; },
+  agentObservation(s, player) { return { self: { player, name: "Player " + player }, total: s.total, metrics: { total: s.total },
+    endgame: { endingConditions: "Counter reaches five.", remaining: "Depends on future moves.", scoring: "Reach five to win.", tiebreakers: "None.", uncertainty: "Future moves determine the end." } }; },
+  describeAction(s, move) { return { label: "Add " + move + " to the counter", category: "Add" }; },
+`;
+
+test("generation validation requires agent descriptions even with random playouts disabled", async (t) => {
+  const missing = await validateJs(t, engine() + view(), { requireAgents: true, playouts: 0 });
+  assert.equal(missing.stage, "api");
+  assert.match(missing.errors.join("\n"), /Missing agent interface/);
+  const valid = await validateJs(t, engine(agentInterface) + view(), { requireAgents: true, playouts: 0 });
+  assert.equal(valid.ok, true, valid.errors.join("\n"));
+  const malformed = await validateJs(t, engine(agentInterface.replace('name: "Player " + player', 'name: null')) + view(), { requireAgents: true, playouts: 0 });
+  assert.equal(malformed.stage, "playout");
+  assert.match(malformed.errors.join("\n"), /self.name/);
+});
+
+test("agent descriptions must support terminal positions during generation validation", async (t) => {
+  const code = agentInterface.replace('return { self:', 'if (s.total >= 5) throw new Error("broken terminal view"); return { self:');
+  const result = await validateJs(t, engine(code) + view(), { requireAgents: true, playouts: 1 });
+  assert.equal(result.stage, "playout");
+  assert.match(result.errors.join("\n"), /broken terminal view/);
+});
+
+test("generation requires endgame facts but existing game validation remains compatible", async t => {
+  const legacy = engine(agentInterface.replace('endgame: {', 'oldEndgame: {')) + view();
+  const generated = await validateJs(t, legacy, { requireAgents: true, playouts: 0 });
+  assert.equal(generated.ok, false);
+  assert.match(generated.errors.join("\n"), /agentObservation.endgame/);
+  const existing = await validateJs(t, legacy, { playouts: 0 });
+  assert.equal(existing.ok, true, existing.errors.join("\n"));
+});
+
 test("syntax errors fail the load stage with a game.js location", async (t) => {
   const result = await validateJs(t, `${engine()}\nwindow.GameView = {`);
   assert.equal(result.stage, "load");

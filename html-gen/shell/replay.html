@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game replay</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f3f1ec; --panel:#fff; --ink:#202b28; --muted:#626b66; --line:#d8ddd6; --accent:#246249; }
+  @media(prefers-color-scheme:dark) { :root { --bg:#131b18; --panel:#1d2722; --ink:#ecf1e9; --muted:#b0bdb2; --line:#3a483e; --accent:#97d3af; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,sans-serif; }
+  header,main { max-width:1380px; margin:auto; padding:20px; }
+  header { display:flex; gap:24px; justify-content:space-between; align-items:center; }
+  h1 { margin:0; font-size:1.7rem; } h2 { margin:0 0 10px; font-size:1rem; }
+  .eyebrow { font-size:.72rem; text-transform:uppercase; letter-spacing:.16em; color:var(--accent); font-weight:700; }
+  #subtitle,.muted { color:var(--muted); font-size:.88rem; } a { color:var(--accent); }
+  main { padding-top:0; display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:18px; align-items:start; }
+  .card { border:1px solid var(--line); border-radius:14px; background:var(--panel); padding:16px; }
+  .column { display:grid; gap:14px; min-width:0; } #board { width:100%; max-width:900px; margin:auto; min-height:240px; }
+  #board>* { max-width:100%; } #status { margin-bottom:12px; font-weight:600; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button,select { font:inherit; padding:7px 10px; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:7px; }
+  button { cursor:pointer; } button:disabled { opacity:.4; cursor:default; }
+  #toggle { background:var(--accent); color:var(--panel); font-weight:700; min-width:85px; }
+  input[type=range] { width:100%; accent-color:var(--accent); margin:18px 0 8px; }
+  .position { display:flex; justify-content:space-between; gap:14px; align-items:center; flex-wrap:wrap; }
+  #perspective { max-width:100%; } #action { font-weight:650; margin:12px 0; }
+  .caption { color:var(--muted); text-transform:uppercase; font-size:.7rem; letter-spacing:.09em; margin-top:14px; }
+  p { margin:6px 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #timeline { max-height:310px; overflow:auto; display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+  #timeline button { text-align:left; width:100%; font-size:.85rem; }
+  #timeline button[aria-current=true] { border-color:var(--accent); box-shadow:inset 3px 0 var(--accent); }
+  #errors { color:#b45309; font-size:.85rem; white-space:pre-wrap; }
+  #fatal { margin:0 20px 18px; border:1px solid #bb403b; color:#bb403b; padding:12px; white-space:pre-wrap; }
+  #rules { white-space:pre-wrap; font-size:.9rem; } summary { cursor:pointer; font-weight:600; }
+  #reflections>article { border-top:1px solid var(--line); padding:12px 0; }
+  @media(max-width:950px) { main { grid-template-columns:1fr; } header { align-items:start; } }
+</style>
+</head>
+<body>
+<header><div><div class="eyebrow">Recorded playtest</div><h1 id="title">Loading replay…</h1><div id="subtitle"></div></div><a id="report-link" href="#saved-report" hidden>Read report ↓</a></header>
+<div id="fatal" role="alert" hidden></div>
+<main>
+  <div class="column">
+    <section class="card"><div id="status" aria-live="polite"></div><div id="board"></div></section>
+    <section class="card" aria-label="Playback controls">
+      <div class="controls"><button id="first" aria-label="Go to setup">Start</button><button id="previous" aria-label="Previous move">← Back</button><button id="toggle">Play</button><button id="next" aria-label="Next move">Next →</button><button id="last" aria-label="Go to final recorded position">End</button>
+        <label>Speed <select id="speed"><option value="2400">Slow</option><option value="1200" selected>Normal</option><option value="400">Fast</option></select></label></div>
+      <input id="seek" type="range" min="0" max="0" value="0" aria-label="Recorded decision">
+      <div class="position"><strong id="position"></strong><label><input id="before" type="checkbox"> Show before selected move</label></div>
+      <p class="muted">Recorded moves only. The board cannot make new moves. Space: play/pause · Arrow keys: step.</p>
+    </section>
+    <section class="card" id="reflection-card" hidden><h2>Final player reflections</h2><p class="muted">Subjective agent feedback, not verified game facts.</p><div id="reflections"></div></section>
+    <details class="card"><summary>Rules</summary><div id="rules"></div></details>
+    <details class="card" id="saved-report" hidden><summary>Playtest report (Markdown)</summary><pre id="report-text" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+  </div>
+  <aside class="column">
+    <section class="card"><h2>Perspective</h2><select id="perspective" aria-label="Viewing perspective"></select><p id="perspective-note" class="muted"></p></section>
+    <section class="card"><div class="eyebrow" id="commentary-heading">Setup</div><p id="action"></p><div class="caption">Feeling before the move</div><p id="feeling"></p><div class="caption">Agent explanation · unverified</div><p id="reason"></p><p id="errors"></p></section>
+    <section class="card" id="plan-card" hidden><h2>Tentative plan</h2><p class="muted">Agent intention, not verified game facts.</p><p id="plan"></p></section>
+    <section class="card"><h2>Move timeline</h2><ol id="timeline"></ol></section>
+  </aside>
+</main>
+<script>/* REPLAY_KIT */</script>
+<script id="replay-game-source" type="application/json">REPLAY_GAME_SOURCE</script>
+<script>
+{
+  const gameScript = document.createElement("script");
+  gameScript.textContent = JSON.parse(document.getElementById("replay-game-source").textContent);
+  document.head.append(gameScript);
+}
+</script>
+<script id="replay-data" type="application/json">REPLAY_DATA</script>
+<script>/* REPLAY_CONTROLLER */</script>
+</body>
+</html>

@@ -4,7 +4,12 @@
   "type": "module",
   "scripts": {
     "gen": "node pipeline.js",
+    "improve": "node improve.js",
+    "organize": "node organize.js",
     "validate": "node gameRunner.js",
+    "playtest": "node playtest.js",
+    "playtest:report": "node playtestReport.js",
+    "replay": "node replay.js",
     "test": "node --test"
   },
   "dependencies": {

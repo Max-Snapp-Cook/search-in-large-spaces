@@ -10,4 +10,10 @@ test("prompts format with only the pipeline's inputs", async () => {
   }
   const repair = (await repairPrompt.formatMessages(input)).at(-1).content;
   assert.match(repair, /\{ winner \}/);
+  for (const prompt of [translatePrompt, repairPrompt]) {
+    const text = (await prompt.formatMessages(input)).at(-1).content;
+    assert.match(text, /agentContext/);
+    assert.match(text, /agentObservation/);
+    assert.match(text, /describeAction/);
+  }
 });

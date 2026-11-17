@@ -10,6 +10,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { rulesPrompt, translatePrompt, repairPrompt } from "./prompts.js";
 import { extractCode, repairUntilPlayable } from "./repairLoop.js";
+import { ensureProject, gameTitle, createVersion, setVersionStatus } from "./gameStorage.js";
 
 // Settings in html-gen/.env win; the repo-root .env is the fallback.
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
@@ -39,7 +40,7 @@ if (!process.env[provider.keyName]?.trim()) {
 }
 
 // Each model call (rules, code, or one repair) must finish streaming within this many seconds.
-const timeoutSeconds = Number(process.env.LLM_TIMEOUT ?? 600);
+const timeoutSeconds = Number(process.env.LLM_TIMEOUT ?? 1200);
 if (!(timeoutSeconds > 0)) {
   throw new Error("LLM_TIMEOUT must be a positive number of seconds.");
 }
@@ -133,24 +134,30 @@ async function run(idea) {
 
   // A unique directory keeps every attempt and its validation feedback together. It is created
   // before the code is written so the rules survive if a later step fails.
-  const outputs = path.join(projectDir, "outputs");
-  await fs.mkdir(outputs, { recursive: true });
-  const outDir = await fs.mkdtemp(path.join(outputs, `${new Date().toISOString().replace(/[:.]/g, "-")}-`));
-  const rulesFile = path.join(outDir, "rules.md");
-  await fs.writeFile(rulesFile, rules);
-  console.log(`Rules saved to ${rulesFile} (rerun with RULES=${path.relative(process.cwd(), rulesFile)} to reuse them).`);
+  const gameProject = await ensureProject(gameTitle(rules));
+  const outDir = await createVersion(gameProject, { kind: "generation" });
+  try {
+    const rulesFile = path.join(outDir, "rules.md");
+    await fs.writeFile(rulesFile, rules);
+    console.log(`Rules saved to ${rulesFile} (rerun with RULES=${path.relative(process.cwd(), rulesFile)} to reuse them).`);
 
-  const code = extractCode(await ask("write game.js", translateChain, { examples, rules, contract }));
-  console.log(`\nGenerated ${code.length} characters of JavaScript.`);
+    const code = extractCode(await ask("write game.js", translateChain, { examples, rules, contract }));
+    console.log(`\nGenerated ${code.length} characters of JavaScript.`);
 
-  const { validation } = await repairUntilPlayable({
-    code, rules, examples, outDir, maxRepairs,
-    repair: (input) => ask("repair game.js", repairChain, { ...input, contract }),
-  });
-  if (validation.stats) console.log("\nRandom playout stats:", validation.stats);
-  const site = path.join(outDir, "index.html");
-  console.log(`\nValidated game saved to ${outDir} (open index.html to play)`);
-  openInBrowser(site);
+    const { validation } = await repairUntilPlayable({
+      code, rules, examples, outDir, maxRepairs,
+      validationOptions: { requireAgents: true },
+      repair: (input) => ask("repair game.js", repairChain, { ...input, contract }),
+    });
+    if (validation.stats) console.log("\nRandom playout stats:", validation.stats);
+    const site = path.join(outDir, "index.html");
+    await setVersionStatus(outDir, "validated", { name: validation.name });
+    console.log(`\nValidated game saved to ${outDir} (open index.html to play)`);
+    openInBrowser(site);
+  } catch (error) {
+    await setVersionStatus(outDir, "failed", { error: error.message });
+    throw error;
+  }
 }
 
 const idea = process.argv[2] ?? "a two-player capture game on a hexagonal board";

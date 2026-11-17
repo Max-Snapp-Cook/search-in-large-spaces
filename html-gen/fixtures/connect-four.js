@@ -57,6 +57,27 @@
       return { board, turn: 3 - state.turn };
     },
     result,
+    agentContext() {
+      return { summary: "Connect Four: drop discs into columns and connect four horizontally, vertically, or diagonally.",
+        board: { columns: "1–7 left to right", rows: "1–6 bottom to top", gravity: "Discs fall to the lowest empty row", empty: "." } };
+    },
+    agentObservation(state, player) {
+      const discs = p => state.board.flat().filter(cell => cell === p).length;
+      const win = winningLine(state.board);
+      return { self: { player, name: this.playerNames[player - 1] },
+        endgame: { endingConditions: "Four connected discs wins immediately; a full board without a line is a draw.",
+          remaining: result(state) ? "Game over; no moves remain." : `At most ${state.board.flat().filter(cell => cell === 0).length} placements remain across both players, including the current move; a winning line can end play sooner.`,
+          scoring: "A connected line wins; disc count alone does not score points.", tiebreakers: "None; a full board without a line is a draw.",
+          uncertainty: result(state) ? "None; the game has ended." : "The winning move, if any, depends on future choices; exact ending time is unknown." },
+        currentPlayer: result(state) ? null : state.turn,
+        board: state.board.map((row, i) => ({ row: i + 1, cells: row.map(cell => cell ? this.playerNames[cell - 1] : ".") })).reverse(),
+        players: [1, 2].map(p => ({ player: p, name: this.playerNames[p - 1], discs: discs(p) })),
+        metrics: { "Discs placed": discs(player), "Has winning line": !!win && state.board[win[0][0]][win[0][1]] === player } };
+    },
+    describeAction(state, col, player) {
+      const row = state.board.findIndex(cells => cells[col] === 0) + 1;
+      return { label: `Drop a ${this.playerNames[player - 1]} disc into column ${col + 1}, landing at row ${row}.`, category: "Drop disc" };
+    },
   };
 
   const SVG = "http://www.w3.org/2000/svg";

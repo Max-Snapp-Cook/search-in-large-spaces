@@ -1,0 +1,27 @@
+{
+  "output": "../outputs/2026-11-09T19-27-11-467Z-3OwmSS/benchmarks/model-comparison-2026-11-10",
+  "maxTokens": 4096,
+  "retryMaxTokens": 8192,
+  "maxAttempts": 2,
+  "timeoutMs": 90000,
+  "sources": [
+    {
+      "id": "new",
+      "match": "../outputs/2026-11-09T19-27-11-467Z-3OwmSS/playtests/2026-11-10T04-58-50-960Z-mA9O2b",
+      "decisions": [11, 24, 26, 33, 40, 45, 48]
+    },
+    {
+      "id": "old",
+      "match": "../outputs/2026-11-09T19-27-11-467Z-3OwmSS/playtests/2026-11-09T21-35-07-734Z-LtPeAd",
+      "decisions": [6, 13, 17]
+    }
+  ],
+  "variants": [
+    { "id": "baseline", "model": "openrouter:qwen/qwen3-30b-a3b-instruct-2507" },
+    { "id": "deepseek-low", "model": "openrouter:deepseek/deepseek-v4.1-flash-1017", "reasoning": { "effort": "low" } },
+    { "id": "qwen36-off", "model": "openrouter:qwen/qwen3.6-35b-a3b", "reasoning": { "enabled": false } },
+    { "id": "qwen38-low", "model": "openrouter:qwen/qwen3.8-27b", "reasoning": { "effort": "low" } },
+    { "id": "kimi-low", "model": "openrouter:moonshotai/kimi-k3.1-pro", "reasoning": { "effort": "low" } },
+    { "id": "qwen36-thinking", "model": "openrouter:qwen/qwen3.6-35b-a3b", "reasoning": { "enabled": true } }
+  ]
+}

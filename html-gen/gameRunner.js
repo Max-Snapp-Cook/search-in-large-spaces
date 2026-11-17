@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { agentMethods, requireAgentMethods, checkAgentContext, checkAgentPosition } from "./agentInterface.js";
 
 const runnerFile = fileURLToPath(import.meta.url);
 export const shellFile = path.join(path.dirname(runnerFile), "shell", "index.html");
@@ -30,7 +31,7 @@ export function parseChildResult({ error, stdout, stderr }, timeoutMs) {
   }
 }
 
-export async function validateGame(file, { playouts = 20, maxMoves = 1000, timeoutMs = 60_000 } = {}) {
+export async function validateGame(file, { playouts = 20, maxMoves = 1000, timeoutMs = 60_000, requireAgents = false } = {}) {
   if (!Number.isSafeInteger(playouts) || playouts < 0 ||
       !Number.isSafeInteger(maxMoves) || maxMoves < 1 ||
       !Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
@@ -41,7 +42,7 @@ export async function validateGame(file, { playouts = 20, maxMoves = 1000, timeo
   try { await fs.access(gameFile); }
   catch { return failure("input", `Game file not found: ${gameFile}`); }
   return new Promise((resolve) => {
-    execFile(process.execPath, [runnerFile, "--child", gameFile, String(playouts), String(maxMoves)], {
+    execFile(process.execPath, [runnerFile, "--child", gameFile, String(playouts), String(maxMoves), String(requireAgents)], {
       timeout: timeoutMs, windowsHide: true, encoding: "utf8", maxBuffer: 4 * 1024 * 1024,
     }, (error, stdout, stderr) => resolve(parseChildResult({ error, stdout, stderr }, timeoutMs)));
   });
@@ -85,7 +86,7 @@ export function playerCounts(engine) {
   return [...new Set([min, engine.players ?? min, max])].sort((a, b) => a - b);
 }
 
-function checkEngine(engine, window) {
+function checkEngine(engine, window, requireAgents) {
   const problems = [];
   if (!engine || typeof engine !== "object") return ["window.GameEngine is not defined. Assign the engine object to window.GameEngine."];
   if (typeof window.GameView?.mount !== "function") problems.push("window.GameView.mount(container, ctx) must be a function.");
@@ -101,6 +102,14 @@ function checkEngine(engine, window) {
     if (engine[fn] !== undefined && typeof engine[fn] !== "function") problems.push(`GameEngine.${fn} must be a function if defined.`);
   }
   if (typeof engine.name !== "string" || !engine.name) problems.push("GameEngine.name must be a non-empty string.");
+  if (requireAgents || agentMethods.some((name) => engine[name] !== undefined)) {
+    try {
+      requireAgentMethods(engine);
+      const context = engine.agentContext();
+      checkAgentContext(context);
+      if (JSON.stringify(context) !== JSON.stringify(engine.agentContext())) throw new Error("agentContext must be deterministic");
+    } catch (error) { problems.push(error.message); }
+  }
   const min = engine.minPlayers ?? engine.players, max = engine.maxPlayers ?? engine.players;
   if (!Number.isSafeInteger(engine.players) || !Number.isSafeInteger(min) || !Number.isSafeInteger(max) ||
       min < 1 || min > engine.players || engine.players > max) {
@@ -149,13 +158,16 @@ function checkHidden(engine, state, player) {
   }
 }
 
-function playout(engine, players, maxMoves) {
+function playout(engine, players, maxMoves, requireEndgame = false) {
   const history = [];
   const branching = [];
   let state = engine.initialState(players);
   try {
     if (!state || json(state) === undefined) throw new Error("initialState(numPlayers) must return a JSON-serializable object.");
     for (;;) {
+      if (engine.agentObservation && (history.length % 10 === 0 || engine.result(state) != null)) {
+        checkAgentPosition(engine, state, players, { requireEndgame });
+      }
       const winners = checkResult(engine.result(state), players);
       if (winners) return { winners, moves: history.length, branching };
       if (history.length >= maxMoves) return { moveLimit: true, moves: history.length, branching };
@@ -232,7 +244,7 @@ export async function shellHtml(gameSrc = "game.js") {
   return html.replace('<script src="game.js"></script>', `<script src="${encodeURI(gameSrc)}"></script>`);
 }
 
-export async function checkGame(gameFile, { playouts, maxMoves }) {
+export async function checkGame(gameFile, { playouts, maxMoves, requireAgents = false }) {
   const { JSDOM, VirtualConsole } = await import("jsdom");
   const scriptErrors = [];
   const notes = [];
@@ -273,16 +285,21 @@ export async function checkGame(gameFile, { playouts, maxMoves }) {
     }
     await sleep(200);
     const engine = window.GameEngine;
-    const apiProblems = checkEngine(engine, window);
+    const apiProblems = checkEngine(engine, window, requireAgents);
     // A missing engine usually means game.js crashed; otherwise contract problems are the root cause.
     if (scriptErrors.length && !engine) return fail("load", scriptErrors);
     if (apiProblems.length) return fail("api", apiProblems);
     if (scriptErrors.length) return fail("load", scriptErrors);
     // Engine checks come first: their errors are clearer than the UI symptoms they cause.
     const counts = playerCounts(engine);
+    // Also exercise all perspectives when random playouts have been disabled.
+    if (engine.agentObservation) {
+      try { for (const n of counts) checkAgentPosition(engine, engine.initialState(n), n, { requireEndgame: requireAgents }); }
+      catch (error) { return fail("playout", [describe(error)]); }
+    }
     const results = [];
     for (let i = 0; i < playouts; i++) {
-      try { results.push(playout(engine, counts[i % counts.length], maxMoves)); }
+      try { results.push(playout(engine, counts[i % counts.length], maxMoves, requireAgents)); }
       catch (error) { return fail("playout", [error.message]); }
     }
     if (scriptErrors.length) return fail("playout", scriptErrors);
@@ -351,9 +368,9 @@ export async function checkGame(gameFile, { playouts, maxMoves }) {
 
 async function main(argv) {
   if (argv[0] === "--child") {
-    const [, file, playouts, maxMoves] = argv;
+    const [, file, playouts, maxMoves, requireAgents] = argv;
     let result;
-    try { result = await checkGame(file, { playouts: Number(playouts), maxMoves: Number(maxMoves) }); }
+    try { result = await checkGame(file, { playouts: Number(playouts), maxMoves: Number(maxMoves), requireAgents: requireAgents === "true" }); }
     catch (error) { result = failure("process", describe(error)); }
     process.stdout.write(JSON.stringify(result));
     process.exit(0);
