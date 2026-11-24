@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { repairUntilPlayable } from "./repairLoop.js";
+import { repairUntilPlayable } from "../src/repairLoop.js";
 
 const failed = { ok: false, stage: "playout", errors: ["Bad syntax"], diagnostics: "Validator details" };
 const passed = { ok: true, stage: "complete", errors: [] };

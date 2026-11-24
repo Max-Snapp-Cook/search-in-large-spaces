@@ -49,6 +49,44 @@
   #log li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--border); }
   #log li .dot { width: 10px; height: 10px; }
   #rules { white-space: pre-wrap; font-size: .92rem; margin: 0; }
+  /* Tutorial (guided first turns) and Coach (help during normal play). */
+  #help { margin-left: auto; display: flex; gap: 8px; }
+  #help button { flex: none; }
+  #tutorial-btn { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  #coach-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .guide { width: 100%; max-width: 900px; padding: 12px 16px; border-radius: 12px;
+           border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+           background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+  .guide[hidden], .guide [hidden] { display: none; }
+  .guide p { margin: 0; }
+  #tutorial { border-width: 2px; border-color: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
+  .tut-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  #tut-progress { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); font-weight: 700; }
+  #tut-exit { flex: none; padding: 2px 10px; font-size: .85rem; }
+  #tut-goal { margin: 0 0 10px; padding-left: 1.3em; }
+  #tut-goal li { margin: 4px 0; }
+  #tut-goal.plain { list-style: none; padding-left: 0; white-space: pre-wrap; }
+  #tut-turn-box { margin: 0 0 10px; }
+  #tut-turn { margin: 0; padding-left: 1.3em; }
+  #tut-turn li { margin: 4px 0; }
+  #tut-turn .sometimes { color: var(--muted); font-size: .85rem; }
+  #tut-phases { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-bottom: 8px; font-size: .88rem; }
+  #tut-phases .who { font-weight: 600; margin-right: 2px; }
+  #tut-phases .ph { padding: 1px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); background: var(--panel); }
+  #tut-phases .ph.now { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+  #tut-phases .ph.sometimes:not(.now) { border-style: dashed; }
+  #tut-phases .sep { color: var(--muted); }
+  #tut-options { margin-bottom: 8px; padding: 8px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+  #tut-options .label { margin-bottom: 2px; }
+  #tut-now { color: var(--muted); margin-top: 2px !important; }
+  #tut-text { font-size: 1.05rem; font-weight: 500; }
+  #tut-last { color: var(--muted); font-size: .9rem; margin-bottom: 4px !important; }
+  #tut-do { margin-top: 6px !important; color: var(--accent); font-weight: 600; }
+  #coach-last { color: var(--muted); font-size: .88rem; margin-bottom: 4px !important; }
+  #coach-text { font-weight: 500; }
+  .guide-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .guide-actions button { flex: none; padding: 5px 14px; }
+  #hint-text { font-size: .92rem; }
   #error { display: none; max-width: 1240px; margin: 0 auto 12px; padding: 12px 16px; border-radius: 10px; background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; }
 </style>
 </head>
@@ -56,11 +94,40 @@
 <header>
   <h1 id="title">Game</h1>
   <div id="players"></div>
+  <div id="help">
+    <button id="tutorial-btn" title="Learn by playing your first turns, step by step">Tutorial</button>
+    <button id="coach-toggle" aria-pressed="false" title="Explains each turn and offers hints">Coach: off</button>
+  </div>
 </header>
 <div id="error"></div>
 <main>
   <section id="stage" class="card">
     <div id="status"></div>
+    <div id="tutorial" class="guide" hidden aria-live="polite">
+      <div class="tut-head"><span id="tut-progress"></span><button id="tut-exit">Exit tutorial</button></div>
+      <ol id="tut-goal"></ol>
+      <div id="tut-turn-box"><span class="label">How a turn works</span><ol id="tut-turn"></ol></div>
+      <p id="tut-last"></p>
+      <div id="tut-phases"></div>
+      <div id="tut-options"><span class="label">What you can do now</span><p id="tut-how"></p><p id="tut-now"></p></div>
+      <p id="tut-text"></p>
+      <p id="tut-do"></p>
+      <div class="guide-actions">
+        <button id="tut-next" class="primary">Next</button>
+        <button id="tut-auto">Do it for me</button>
+        <button id="tut-keep" class="primary">Keep playing</button>
+        <button id="tut-new">New game</button>
+      </div>
+    </div>
+    <div id="coach" class="guide" hidden>
+      <p id="coach-last"></p>
+      <p id="coach-text"></p>
+      <div class="guide-actions">
+        <button id="hint">Hint</button>
+        <span id="hint-text"></span>
+        <button id="hint-play" class="primary">Play it</button>
+      </div>
+    </div>
     <div id="board"></div>
     <div id="curtain"><p id="curtain-text"></p><button id="reveal" class="primary">Show my view</button></div>
   </section>
@@ -215,6 +282,14 @@ window.GameKit = (function () {
   let seats = [];
   let state, history, log, lastMove, pending, generation = 0;
   let shownViewer = null; // whose private view is on screen in hot-seat games
+  // Coach: help during normal play. The setting is remembered per browser; storage may be unavailable.
+  let coachOn = false;
+  try { coachOn = localStorage.getItem("gameshell.coach") === "on"; } catch {}
+  let hint = null;        // { key, move?, text? } for the position it was asked in
+  // Guided tutorial: null, or { phase: "intro" | "steps" | "practice" | "outro", step, humanMoves, script, saved,
+  // cached, lastMover, practiceMoves, practiceBegun }. While it runs the computer does not move by itself: every
+  // move comes from the tutorial steps, or from Next / Do it for me during the practice turn.
+  let tut = null;
 
   const json = (x) => JSON.stringify(x);
   const humans = () => seats.map((s, i) => (s === "human" ? i + 1 : 0)).filter(Boolean);
@@ -253,11 +328,20 @@ window.GameKit = (function () {
     }
     const curtain = !!(engine.hidden && !result && hs.length > 1 && viewer !== shownViewer);
     const legalMoves = result ? [] : engine.legalMoves(state);
+    // In hidden-information games only the viewer may see their own options.
+    let offered = !engine.hidden || viewer === null || viewer === player ? legalMoves : [];
+    let canMove = !result && !isComputer(player) && !pending && !curtain;
+    if (tut) {
+      // The board only offers the move the current tutorial step teaches, so the view highlights just that.
+      // In the practice turn ("free") the learner may make any legal move.
+      const step = tutorialStep();
+      offered = step?.kind === "human" ? [step.move] : step?.kind === "free" ? legalMoves : [];
+      canMove = !result && (step?.kind === "human" || step?.kind === "free");
+    }
     return {
       result, player, viewer, curtain,
-      // In hidden-information games only the viewer may see their own options.
-      legalMoves: !engine.hidden || viewer === null || viewer === player ? legalMoves : [],
-      canMove: !result && !isComputer(player) && !pending && !curtain,
+      legalMoves: offered,
+      canMove,
       lastMove, players: numPlayers, allLegalMoves: legalMoves,
     };
   }
@@ -281,13 +365,305 @@ window.GameKit = (function () {
     const status = $("status");
     status.classList.toggle("over", !!info.result);
     status.textContent = info.result ? resultText(info.result)
-      : isComputer(info.player) ? `${names[info.player - 1]} is thinking…` : `${names[info.player - 1]} to move`;
+      : isComputer(info.player) && !tut ? `${names[info.player - 1]} is thinking…` : `${names[info.player - 1]} to move`;
     $("moves").textContent = `Move ${history.length}`;
-    $("undo").disabled = !history.length || !humans().length;
+    $("undo").disabled = !history.length || !humans().length || !!tut;
+    $("count").disabled = !!tut;
+    $("seats").querySelectorAll("select").forEach((sel) => { sel.disabled = !!tut; });
     $("log").innerHTML = log.slice(-200).map(({ player, text }) =>
       `<li><span class="dot" style="background:${colors[player - 1]}"></span><span>${text}</span></li>`).join("");
     $("log").scrollTop = $("log").scrollHeight;
+    renderTutorial(info);
+    renderCoach(info, shown);
     return info;
+  }
+
+  // ---- Coach: explains the current turn during normal play, with hints ----
+  const positionKey = () => `${generation}:${history.length}`;
+
+  function explain(shown, player) {
+    if (engine.explainTurn) {
+      try {
+        const text = String(engine.explainTurn(shown, player) ?? "").trim();
+        if (text) return text;
+      } catch {}
+    }
+    return `${names[player - 1]} to move. Pick one of the highlighted options, or press Hint for a suggestion.`;
+  }
+
+  function renderCoach(info, shown) {
+    $("coach-toggle").setAttribute("aria-pressed", String(coachOn));
+    $("coach-toggle").textContent = coachOn ? "Coach: on" : "Coach: off";
+    $("coach").hidden = !coachOn || !!tut;
+    if (!coachOn || tut) return;
+    const last = log[log.length - 1];
+    $("coach-last").textContent = last ? `Last move: ${names[last.player - 1]} ${last.text}` : "";
+    $("coach-last").hidden = !last;
+    let text;
+    if (info.result) text = "Game over. Press Restart to play again.";
+    else if (info.curtain) text = `Pass the device to ${names[info.viewer - 1]}. The coach explains their turn once they show their view.`;
+    else if (!isComputer(info.player) || !humans().length) text = explain(shown, info.player);
+    else text = `${names[info.player - 1]} (computer) is choosing a move.`;
+    $("coach-text").textContent = text;
+    const current = hint && hint.key === positionKey() ? hint : null;
+    const ready = !!current && "move" in current; // a move can be falsy (e.g. column 0)
+    $("hint").hidden = !info.canMove;
+    $("hint").disabled = !!current && !ready;
+    $("hint-text").textContent = !info.canMove || !current ? "" : ready ? `Suggested: ${current.text}` : "Thinking…";
+    $("hint-play").hidden = !(info.canMove && ready);
+  }
+
+  function setCoach(on) {
+    coachOn = !!on;
+    try { localStorage.setItem("gameshell.coach", coachOn ? "on" : "off"); } catch {}
+    render();
+  }
+
+  // Asks the computer opponent's search what it would play for the human to move.
+  function requestHint() {
+    const info = snapshot();
+    if (!info.canMove) return;
+    const key = positionKey();
+    hint = { key };
+    render();
+    setTimeout(() => {
+      if (hint?.key !== key || positionKey() !== key) return;
+      const move = mctsMove(state, 900);
+      hint = { key, move, text: describe(state, move) };
+      render();
+    }, 30);
+  }
+
+  function playHint() {
+    if (hint?.key === positionKey() && "move" in hint) play(hint.move);
+  }
+
+  // ---- Guided tutorial ----
+  // engine.tutorial = { players?, intro?, steps: [{ say(state, move), choose?(state, legalMoves) }], outro }.
+  // Steps run in order from a new game with the learner as player 1. A step with choose() is a move: when
+  // player 1 is to move they click it (only that move is offered); otherwise the opponent makes it on Next.
+  // A step without choose() is an explanation. Games without a script get a generic one: the computer's
+  // search picks each move and describeMove explains it, for three of the learner's turns.
+  // Every step also shows which part of the turn it is (engine.turnPhases / engine.turnPhase) and what the
+  // learner can do there. After the script the learner plays one whole turn on their own with every legal
+  // move open (the practice turn), and the last page recaps the goal and each part of a turn.
+  const GENERIC_TURNS = 3;
+  const PRACTICE_CAP = 15; // learner moves before the practice turn ends anyway (solo games, very long turns)
+  const validScript = (t) => t && Array.isArray(t.steps) && t.steps.length > 0 && t.steps.every((st) => typeof st?.say === "function");
+  function genericScript() {
+    return { generic: true, steps: Array.from({ length: 60 }, () => ({ choose: (s) => mctsMove(s, 250), say: () => "" })) };
+  }
+
+  // The parts of a turn the game declares, e.g. [{ id: "roll", name: "Roll", how: "Click Roll ...", sometimes? }].
+  const turnPhases = () => (Array.isArray(engine.turnPhases) ? engine.turnPhases : [])
+    .filter((p) => p && typeof p.name === "string" && p.name.trim())
+    .map((p) => ({ id: p.id ?? p.name, name: p.name.trim(), how: String(p.how ?? "").trim(), sometimes: !!p.sometimes }));
+
+  function currentPhase() {
+    const phases = turnPhases();
+    if (!phases.length || typeof engine.turnPhase !== "function" || engine.result(state)) return null;
+    try {
+      const id = engine.turnPhase(state);
+      return phases.find((p) => json(p.id) === json(id)) ?? null;
+    } catch (e) { console.error(e); return null; }
+  }
+
+  function tutorialStep() {
+    if (!tut) return null;
+    const player = engine.currentPlayer(state);
+    if (tut.phase === "practice") {
+      const key = `practice:${history.length}`;
+      if (tut.cached?.key === key) return tut.cached;
+      // Opponents' moves are picked by the computer when the learner presses Next, so rendering stays fast.
+      const kind = player === 1 ? "free" : "auto";
+      const text = kind === "free"
+        ? "Your turn, on your own: every legal option is open now. Use what you learned, or press Do it for me to let the computer choose."
+        : `Next you'll play a whole turn by yourself. First it's ${names[player - 1]}'s turn: press Next to see what they do.`;
+      tut.cached = { key, kind, player, text };
+      return tut.cached;
+    }
+    if (tut.phase !== "steps") return null;
+    const key = `${tut.step}:${history.length}`;
+    if (tut.cached?.key === key) return tut.cached;
+    const step = tut.script.steps[tut.step];
+    const moves = engine.legalMoves(state);
+    let move;
+    if (step.choose) {
+      let chosen;
+      try { chosen = step.choose(state, moves); } catch (e) { console.error(e); }
+      move = moves.find((m) => json(m) === json(chosen));
+      if (move === undefined) move = moves[0];
+    }
+    const kind = !step.choose ? "info" : player === 1 ? "human" : "auto";
+    let text = "";
+    try { text = String(step.say(engine.hidden ? engine.observe(state, 1) : state, move) ?? "").trim(); } catch (e) { console.error(e); }
+    if (!text && kind === "human") text = `Your turn. Suggested move: ${describe(state, move)}.`;
+    if (!text && kind === "auto") text = `Now it's ${names[player - 1]}'s turn. Press Next to see what they do.`;
+    tut.cached = { key, kind, move, player, text };
+    return tut.cached;
+  }
+
+  // Moves the tutorial on: script finished -> practice turn; game over or practice turn played -> recap.
+  function checkTutorialEnd() {
+    if (!tut) return;
+    if (tut.phase === "steps" && (tut.step >= tut.script.steps.length ||
+        (tut.script.generic && tut.humanMoves >= GENERIC_TURNS))) {
+      Object.assign(tut, { phase: "practice", practiceMoves: 0, practiceBegun: false, cached: null });
+    }
+    if ((tut.phase === "steps" || tut.phase === "practice") && engine.result(state)) tut.phase = "outro";
+    if (tut.phase === "practice" && ((tut.practiceBegun && engine.currentPlayer(state) !== 1) ||
+        tut.practiceMoves >= (numPlayers === 1 ? GENERIC_TURNS : PRACTICE_CAP))) tut.phase = "outro";
+  }
+
+  function fillList(id, items, plain = false) {
+    const list = $(id);
+    list.innerHTML = "";
+    list.classList.toggle("plain", plain);
+    for (const item of items) {
+      const li = document.createElement("li");
+      if (typeof item === "string") li.textContent = item;
+      else {
+        const name = document.createElement("strong");
+        name.textContent = item.name;
+        li.append(name, item.how ? ` — ${item.how}` : "");
+        if (item.sometimes) {
+          const note = document.createElement("span");
+          note.className = "sometimes";
+          note.textContent = " (only some turns)";
+          li.append(note);
+        }
+      }
+      list.appendChild(li);
+    }
+  }
+
+  // "Your turn: Roll › Buy › End turn" with the current part highlighted.
+  function renderPhases(player, phase) {
+    const box = $("tut-phases");
+    box.innerHTML = "";
+    const phases = turnPhases();
+    if (!phases.length || !player) return false;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = player === 1 ? "Your turn:" : `${names[player - 1]}'s turn:`;
+    box.appendChild(who);
+    phases.forEach((p, i) => {
+      if (i) {
+        const sep = document.createElement("span");
+        sep.className = "sep";
+        sep.textContent = "›";
+        box.appendChild(sep);
+      }
+      const chip = document.createElement("span");
+      chip.className = "ph" + (p.id === phase?.id ? " now" : "") + (p.sometimes ? " sometimes" : "");
+      chip.textContent = p.name;
+      if (p.sometimes) chip.title = "Only happens on some turns";
+      box.appendChild(chip);
+    });
+    return true;
+  }
+
+  function renderTutorial(info) {
+    $("tutorial").hidden = !tut;
+    $("tutorial-btn").disabled = !!tut;
+    if (!tut) return;
+    const script = tut.script;
+    const show = (id, on) => { $(id).hidden = !on; };
+    const step = tutorialStep();
+    const quick = Array.isArray(engine.quickStart) ? engine.quickStart.filter((x) => typeof x === "string" && x.trim()) : [];
+    const overview = tut.phase === "intro" || tut.phase === "outro";
+    // The first page teaches the goal and the parts of a turn; the last page repeats both as a cheat sheet.
+    if (overview) fillList("tut-goal", quick.length ? quick : [engine.rules || ""], !quick.length);
+    show("tut-goal", overview);
+    const phases = turnPhases();
+    if (overview && phases.length) fillList("tut-turn", phases);
+    show("tut-turn-box", overview && phases.length > 0);
+
+    const total = script.generic ? GENERIC_TURNS : script.steps.length;
+    $("tut-progress").textContent = tut.phase === "intro" ? "Tutorial · How the game works"
+      : tut.phase === "outro" ? "Tutorial · How to play (recap)"
+      : tut.phase === "practice" ? "Tutorial · Your turn on your own"
+      : script.generic ? `Tutorial · Your turn ${Math.min(tut.humanMoves + 1, total)} of ${total}`
+      : `Tutorial · Step ${tut.step + 1} of ${total}`;
+
+    let text = "", doText = "";
+    if (tut.phase === "intro") {
+      text = String(script.intro || "").trim() ||
+        "Next you'll play your first turns with a guide: each step shows what you can do and what to click.";
+    } else if (tut.phase === "outro") {
+      const ended = info.result ? `The game ended: ${resultText(info.result)} ` : "";
+      text = ended + (String(script.outro || "").trim() ||
+        "That's the basics! Keep playing this game against the computer, or start a new one. The full rules are in the Rules panel, and Coach gives tips on every turn.");
+    } else if (step) {
+      text = step.text;
+      if (step.kind === "human") doText = "Click the highlighted option on the board, or press Do it for me.";
+      if (step.kind === "free") doText = "Pick any option on the board.";
+    }
+
+    // During play: which part of the turn this is, and what the learner can do in it.
+    const playing = tut.phase === "steps" || tut.phase === "practice";
+    const player = playing && !info.result ? engine.currentPlayer(state) : null;
+    const phase = player ? currentPhase() : null;
+    show("tut-phases", playing && renderPhases(player, phase));
+    const learnerTurn = player === 1 && (step?.kind === "human" || step?.kind === "free");
+    const how = learnerTurn && phase?.how ? phase.how : "";
+    const now = learnerTurn ? explain(engine.hidden ? engine.observe(state, 1) : state, 1) : "";
+    $("tut-how").textContent = how;
+    $("tut-now").textContent = now && now !== how ? now : "";
+    show("tut-how", !!how);
+    show("tut-now", !!$("tut-now").textContent);
+    show("tut-options", learnerTurn && !!(how || $("tut-now").textContent));
+
+    // Recap the previous move, so what the opponent just did is always explained.
+    const last = log[log.length - 1];
+    const recap = playing && last ? `Last move: ${last.player === 1 ? "You" : names[last.player - 1]} ${last.text}` : "";
+    $("tut-last").textContent = recap;
+    show("tut-last", !!recap);
+    $("tut-text").textContent = text;
+    $("tut-do").textContent = doText;
+    show("tut-do", !!doText);
+    const auto = step?.kind === "auto";
+    show("tut-next", tut.phase === "intro" || step?.kind === "info" || auto);
+    $("tut-next").textContent = tut.phase === "intro" ? "Start" : auto ? `Next: see ${names[step.player - 1]}'s move` : "Next";
+    show("tut-auto", step?.kind === "human" || step?.kind === "free");
+    show("tut-keep", tut.phase === "outro" && !info.result);
+    show("tut-new", tut.phase === "outro");
+  }
+
+  function startTutorial() {
+    const script = validScript(engine.tutorial) ? engine.tutorial : genericScript();
+    const players = Math.min(maxPlayers, Math.max(minPlayers, Number(script.players) || defaultPlayers));
+    tut = { phase: "intro", step: 0, humanMoves: 0, script, cached: null, lastMover: null,
+      practiceMoves: 0, practiceBegun: false,
+      saved: tut?.saved ?? { players: numPlayers, seats: seats.slice() } };
+    configure({ players, seats: Array.from({ length: players }, (_, i) => (i === 0 ? "human" : "mcts")) });
+    $("tutorial").scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }
+
+  // Start / Next / see the opponent's move. With doIt, also makes the learner's move for them.
+  function tutorialNext(doIt = false) {
+    if (!tut) return;
+    if (tut.phase === "intro") { tut.phase = "steps"; checkTutorialEnd(); render(); return; }
+    const step = tutorialStep();
+    if (!step) return;
+    if (step.kind === "info") { tut.step++; checkTutorialEnd(); render(); }
+    else if (tut.phase === "practice" && (step.kind === "auto" || doIt)) apply(mctsMove(state, 300));
+    else if (step.kind === "auto" || doIt) apply(step.move);
+  }
+
+  // Leaves the tutorial and continues this game against the computer.
+  function keepPlaying() {
+    if (!tut) return;
+    tut = null;
+    afterChange();
+  }
+
+  // Leaves the tutorial and puts back the players and seats from before it.
+  function exitTutorial() {
+    if (!tut) return;
+    const { players, seats: saved } = tut.saved;
+    tut = null;
+    configure({ players, seats: saved });
   }
 
   function describe(before, move) {
@@ -301,12 +677,24 @@ window.GameKit = (function () {
     log.push({ player, text: describe(state, move) });
     state = engine.applyMove(state, move);
     lastMove = move;
+    if (tut?.phase === "steps") {
+      if (player === 1) tut.humanMoves++;
+      tut.step++;
+    } else if (tut?.phase === "practice" && player === 1) {
+      tut.practiceMoves++;
+      // The practice turn counts from the start of one of the learner's turns, not the middle of one.
+      if (tut.lastMover !== 1) tut.practiceBegun = true;
+    }
+    if (tut) {
+      tut.lastMover = player;
+      checkTutorialEnd();
+    }
     afterChange();
   }
 
   function afterChange() {
     const info = render();
-    if (!info.result && isComputer(info.player) && !pending) scheduleComputer();
+    if (!tut && !info.result && isComputer(info.player) && !pending) scheduleComputer();
   }
 
   // Called by the view when a human picks a move; ignores anything illegal or out of turn.
@@ -447,15 +835,26 @@ window.GameKit = (function () {
     restart();
   }
 
-  $("restart").addEventListener("click", restart);
+  $("restart").addEventListener("click", () => (tut ? exitTutorial() : restart()));
   $("undo").addEventListener("click", undo);
   $("reveal").addEventListener("click", reveal);
   $("count").addEventListener("change", () => configure({ players: Number($("count").value) }));
+  $("coach-toggle").addEventListener("click", () => setCoach(!coachOn));
+  $("hint").addEventListener("click", requestHint);
+  $("hint-play").addEventListener("click", playHint);
+  $("tutorial-btn").addEventListener("click", startTutorial);
+  $("tut-next").addEventListener("click", () => tutorialNext());
+  $("tut-auto").addEventListener("click", () => tutorialNext(true));
+  $("tut-keep").addEventListener("click", keepPlaying);
+  $("tut-new").addEventListener("click", exitTutorial);
+  $("tut-exit").addEventListener("click", exitTutorial);
 
   const board = view.mount($("board"), { play, engine, names, colors, kit: window.GameKit });
   // Exposed for the headless validator and for debugging in the browser console.
   window.GameShell = {
-    play, restart, undo, reveal, configure,
+    play, restart, undo, reveal, configure, setCoach, requestHint,
+    startTutorial, tutorialNext, keepPlaying, exitTutorial,
+    get tutorialPhase() { return tut?.phase ?? null; },
     getState: () => state,
     get numPlayers() { return numPlayers; },
     mctsMove, // (state, budgetMs) => move chosen by the computer for the player to move

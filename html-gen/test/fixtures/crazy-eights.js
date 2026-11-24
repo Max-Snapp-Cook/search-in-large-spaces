@@ -18,6 +18,38 @@
     return null;
   }
 
+  // Tutorial rule for any player: play a matching ordinary card, else an eight naming the suit they hold
+  // most of, else draw (or pass). Works for any deal.
+  function tutorialChoice(state, moves) {
+    const plain = moves.find((m) => m.play && K.cardRank(m.play) !== 8);
+    if (plain) return plain;
+    const eights = moves.filter((m) => m.play);
+    if (eights.length) {
+      const hand = state.hands[state.turn - 1].filter((c) => K.cardRank(c) !== 8);
+      const count = (suit) => hand.filter((c) => K.cardSuit(c) === suit).length;
+      return eights.reduce((best, m) => (count(m.suit) > count(best.suit) ? m : best));
+    }
+    return moves[0];
+  }
+  const needs = (state) => {
+    const rank = K.cardLabel(top(state)).slice(0, -1);
+    return `${K.SUITS[state.suit]} or ${/^(8|A)$/.test(rank) ? "an" : "a"} ${rank}`;
+  };
+  function learnerSays(state, move) {
+    const topCard = K.cardLabel(top(state));
+    if (move.play && K.cardRank(move.play) !== 8) {
+      const how = K.cardSuit(move.play) === state.suit ? `same suit (${K.SUITS[state.suit]})` : "same rank";
+      return `The top card is ${topCard}, so you need ${needs(state)}. Click your ${K.cardLabel(move.play)}: it has the ${how}, ` +
+        "so it can go on the pile, and you are one card closer to an empty hand.";
+    }
+    if (move.play) {
+      return `None of your ordinary cards match ${needs(state)}, but eights are wild. Click your ${K.cardLabel(move.play)}, ` +
+        `then click ${K.SUITS[move.suit]}: you choose the next suit, so pick the one you hold the most of.`;
+    }
+    if (move.draw) return `Nothing in your hand matches ${needs(state)}. Click "Draw a card": you take one card and your turn ends.`;
+    return "Nothing matches and the deck is empty, so click Pass.";
+  }
+
   window.GameEngine = {
     name: "Crazy Eights",
     minPlayers: 2,
@@ -29,6 +61,32 @@
     rules: "Each player gets 5 cards. On your turn play a card matching the suit or rank of the top card.\n" +
       "Eights are wild: play one and name the next suit.\nIf you cannot play, draw one card and your turn ends.\n" +
       "First to empty their hand wins. If play is blocked, the fewest cards wins.",
+    quickStart: [
+      "Goal: be the first to get rid of all your cards.",
+      "On your turn, play a card that matches the suit or the rank of the top card of the pile.",
+      "Eights are wild: play one any time and choose the suit the next player must follow.",
+      "If you have nothing to play, draw a card. If nobody can play, the fewest cards wins.",
+    ],
+    // One decision per turn: play a matching card, or draw when nothing matches.
+    turnPhases: [
+      { id: "play", name: "Play or draw",
+        how: "Click a card with the same suit or rank as the top card (for an eight, then click a suit). If nothing matches, click Draw a card." },
+    ],
+    turnPhase: () => "play",
+    tutorial: {
+      intro: "You are North, at the bottom of the table. East is the computer; you can see your own cards but not theirs.",
+      steps: [
+        { choose: tutorialChoice, say: learnerSays },
+        { choose: tutorialChoice, say: (state) => `East's turn. They also need ${needs(state)}, or they must draw. Press Next to see what they do.` },
+        { say: (state) => `East has ${state.hands[1].length} cards left and you have ${state.hands[0].length}. ` +
+            "You can count their cards but not see them. Whoever empties their hand first wins." },
+        { choose: tutorialChoice, say: learnerSays },
+        { choose: tutorialChoice, say: (state) => `East plays next and needs ${needs(state)}. Press Next.` },
+        { choose: tutorialChoice, say: learnerSays },
+      ],
+      outro: "You win by getting rid of all your cards first. Tip: hold on to your eights until nothing else matches, " +
+        "and when you play one, name the suit you have the most of.",
+    },
     initialState(n = 2) {
       let [deck, seed] = K.shuffle(K.standardDeck(), K.newSeed());
       const hands = Array.from({ length: n }, (_, i) => deck.slice(i * 5, i * 5 + 5));
@@ -93,6 +151,20 @@
       const scores = state.hands.map((h) => 1 / (1 + h.length));
       const total = scores.reduce((a, b) => a + b, 0);
       return scores.map((s) => s / total);
+    },
+    // state is what `player` can see: their own hand, the pile, and everyone's hand sizes.
+    explainTurn(state, player) {
+      const t = top(state);
+      const rank = K.cardLabel(t).slice(0, -1);
+      const target = `${K.SUITS[state.suit]} or ${/^(8|A)$/.test(rank) ? "an" : "a"} ${rank}`;
+      if (player !== state.turn) return `Waiting for ${this.playerNames[state.turn - 1]}. The pile needs ${target}.`;
+      const moves = this.legalMoves(state);
+      if (moves[0]?.draw) return `Nothing in your hand matches ${target}, so draw a card.`;
+      if (moves[0]?.pass) return "Nothing matches and the deck is empty, so you must pass.";
+      const playable = new Set(moves.map((m) => m.play)).size;
+      const fewest = Math.min(...state.hands.filter((_, i) => i !== player - 1).map((h) => h.length));
+      return `Play a card matching ${target} (eights are wild). You have ${playable} playable ` +
+        `card${playable === 1 ? "" : "s"}; the closest opponent has ${fewest} left.`;
     },
     describeMove(state, move) {
       if (move.play) return `played ${K.cardLabel(move.play)}` + (move.suit ? ` and called ${K.SUITS[move.suit]}` : "");

@@ -4,7 +4,9 @@ game.js is a plain browser script (no import/export, no require, no external lib
 network requests). It is loaded by a fixed index.html shell that already provides: the page layout, the
 game title, player chips, a player-count picker, a Human/Computer setting per seat, a "whose turn / who won"
 status line, Undo and Restart, a move log, a rules panel, a "pass the device" screen between human players in
-hidden-information games, and computer opponents (random and a strong Monte Carlo search).
+hidden-information games, computer opponents (random and a strong Monte Carlo search), a guided Tutorial that
+walks a new player through their first turns, and a Coach box that explains each turn with a Hint button.
+You supply the words for these: quickStart, turnPhases, tutorial, explainTurn, and describeMove (below).
 Do NOT build any of those yourself. game.js defines exactly two globals: window.GameEngine and window.GameView.
 
 Any kind of tabletop game can be built this way: abstract board games (chess, go), card games (Uno, rummy,
@@ -39,6 +41,61 @@ window.GameEngine — pure game logic with no DOM access (it is run headlessly f
   playerNames: optional array of display names, one per possible player, e.g. ["White", "Black"]
   playerColors: optional array of CSS colors, one per possible player (shown in chips, seats, and the log)
   rules: a concise plain-text rules summary shown in the rules panel
+  quickStart: 3 to 5 short plain-text steps (each one sentence, under 160 characters) for someone who has never
+    played: the goal, what a turn looks like, the key rule to remember, and how the game ends. Shown as the
+    first page of the tutorial, e.g. ["Get four of your discs in a row to win.", "On your turn, click a column to drop a disc.", ...]
+  turnPhases: the parts of one turn, in order, so the tutorial can teach a whole turn and show where the player is:
+    [
+      { id: "roll", name: "Roll", how: "Click Roll to throw both dice; your token moves that many spaces." },
+      { id: "buy", name: "Buy or pass", sometimes: true,
+        how: "If you land on an unowned street, click Buy to pay its price or Pass to leave it." },
+      { id: "end", name: "End turn", how: "Click End turn when you're done; the next player rolls." },
+    ]
+    name is 1 to 3 words. how is one sentence (under 300 characters): what the player can do in this part and
+    exactly what to click on screen, including the choices they have. Mark sometimes: true on a part that does
+    not happen on every turn (buying only on unowned squares, discarding only on a 7, responding to a trade).
+    Alternatives within one decision are one part, not several ("Play or draw": play a matching card, or draw
+    if nothing matches). A game with one kind of move has a single part ({ id: "move", name: "Drop a disc", how }).
+  turnPhase(state): the id of the turnPhases entry the current player is in right now (for example from the
+    phase field in state). Must always return one of the ids while the game is running.
+  tutorial: a guided first game for someone who has never played and will not read the rules. Its job: after one
+    round the learner knows how to play a whole turn on their own. The shell starts a new game with the learner as
+    player 1 and the computer as everyone else, shows quickStart and the parts of a turn (turnPhases), then runs
+    the steps in order, one at a time, in a box above the board. On each of the learner's moves the box shows
+    which part of the turn they are in, what they can do in it (that part's `how` and explainTurn), and then the
+    step's own text. After the steps the learner plays one complete turn on their own with every legal move
+    allowed, and the last page recaps the goal and each part of a turn.
+    {
+      players: 2,       // optional, defaults to `players`
+      intro: "...",     // optional: one sentence shown under quickStart before the first step
+      steps: [
+        { choose(state, legalMoves) { return a move from legalMoves }, say(state, move) { return "..." } },
+        { say(state) { return "..." } },   // no choose: an explanation step with a Next button
+        ...
+      ],
+      outro: "...",     // last page: how to win, one strategy tip, what to try next
+    }
+    A step with choose() is a move. When it is player 1's turn, the board offers ONLY that move (the view
+    highlights it, because it is the only entry in info.legalMoves) and the learner clicks it, or presses
+    "Do it for me". When it is another player's turn, the learner presses Next and that player makes the move.
+    A step without choose() just explains something (scoring, a new phase) and waits for Next.
+    - Cover a full round: at least the learner's first 3 moves, including every part of a turn that is not marked
+      sometimes (the learner must make a move in each one), and each opponent's turn as its own step(s) in turn order.
+      Add an explanation step (no choose) whenever a new part of the turn or a new idea appears: what this part is
+      for and what the choices are. Aim for 6 to 14 steps; do not play to the end of the game.
+    - say(state, move) returns 1 to 3 short sentences (under 400 characters). The box already lists what the
+      learner can do (the part's `how` and explainTurn), so for the learner's moves explain THIS choice: exactly
+      what to click as it appears on screen ("Click the glowing column 4", "Click the Roll button"), what it does,
+      why it is good here, and when you would pick a different option. For opponents' moves say what they are
+      about to do and what it means for the learner. Use the real situation: the cards, dice, or target in
+      `state`, and the chosen `move`.
+      `state` is what player 1 can see (engine.observe(state, 1) in hidden-information games): describe only that.
+    - choose(state, legalMoves) receives the full state and must return one of legalMoves, chosen by a rule that
+      works for ANY shuffle or roll (e.g. "the card that matches the top card's suit, else draw"), never a
+      hard-coded card or position that only exists in one deal. It must be deterministic (no Math.random).
+    - The validator replays the tutorial several times with different random setups and fails if choose returns
+      an illegal move, say returns no text, the learner makes fewer than 3 moves, the learner skips a part of the
+      turn that is not marked sometimes, or an opponent never moves (unless the game ends during the tutorial).
   initialState(numPlayers): returns the starting state (a plain JSON-serializable object). Store numPlayers in it.
     Shuffle/deal here using a seed from GameKit.newSeed(), and keep the next seed in the state.
   currentPlayer(state): the player who must decide now, numbered 1..numPlayers
@@ -69,8 +126,14 @@ window.GameEngine — pure game logic with no DOM access (it is run headlessly f
   evaluate(state): array with one number in [0, 1] per player estimating how well each player is doing
     (e.g. share of victory points, money, or material). Strongly recommended for long games (economic,
     resource, or many-round games): the computer opponent uses it when its simulations are cut off.
-  describeMove(state, move): short text for the move log, e.g. "rolled 8 and bought Oak Street". It must only
-    reveal public information (say "drew a card", not which card).
+  Required, for the move log and the tutorial:
+  describeMove(state, move): short text for the move log, hints, and coach, written to follow the player's name,
+    e.g. "rolled 8 and bought Oak Street". It must only reveal public information (say "drew a card", not which card).
+  explainTurn(state, player): one or two plain sentences (under 300 characters) telling `player` what to decide
+    right now and how to do it in this view, e.g. "Choose a column to drop your disc. You can block Yellow's three
+    in a row by playing column 4." Mention the current phase, the options, and anything urgent (a threat, a target
+    number, cards left). In hidden-information games `state` is engine.observe(state, player) (hidden parts are null),
+    so only use what that player can see. It is called on every turn while the Coach is on, so keep it fast.
 
 window.GameView — renders the game and turns user input into moves:
   mount(container, ctx): called once. container is an empty <div> about 900px wide (it may report width 0
@@ -113,6 +176,21 @@ Skeleton:
     name: "...", players: 2, minPlayers: 2, maxPlayers: 4,
     playerNames: ["...", "...", "...", "..."], playerColors: ["#...", "#...", "#...", "#..."],
     rules: "...",
+    quickStart: ["Goal: ...", "On your turn: ...", "Remember: ...", "The game ends when ..."],
+    turnPhases: [
+      { id: "...", name: "...", how: "Click ... to ... ." },
+      { id: "...", name: "...", how: "...", sometimes: true },
+    ],
+    turnPhase(state) { return state.phase; },
+    tutorial: {
+      intro: "...",
+      steps: [
+        { choose: (state, moves) => moves[0], say: (state, move) => "Click ... to ... . This helps because ..." },
+        { choose: (state, moves) => moves[0], say: (state, move) => "Now your opponent ... . Press Next to see it." },
+        /* ... at least 3 moves by player 1 ... */
+      ],
+      outro: "You win by ... . Tip: ... .",
+    },
     // hidden: true, observe(state, player) { ... }, determinize(state, player) { ... },
     initialState(numPlayers) {
       let seed = K.newSeed();
@@ -125,6 +203,7 @@ Skeleton:
     result(state) { /* ... */ },
     evaluate(state) { /* ... */ },
     describeMove(state, move) { /* ... */ },
+    explainTurn(state, player) { /* ... */ },
   };
 
   window.GameView = {

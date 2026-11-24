@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "gen": "node pipeline.js",
-    "validate": "node gameRunner.js",
-    "test": "node --test"
+    "gen": "node src/pipeline.js",
+    "validate": "node src/gameRunner.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@langchain/core": "^1.2.17",

@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const runnerFile = fileURLToPath(import.meta.url);
-export const shellFile = path.join(path.dirname(runnerFile), "shell", "index.html");
+export const shellFile = path.join(path.dirname(runnerFile), "..", "shell", "index.html");
 const failure = (stage, message, diagnostics = "") => ({
   ok: false, stage, errors: [message], stats: null, diagnostics,
 });
@@ -97,8 +97,51 @@ function checkEngine(engine, window) {
       if (typeof engine[fn] !== "function") problems.push(`GameEngine.hidden is true, so GameEngine.${fn} must be a function.`);
     }
   }
-  for (const fn of ["evaluate", "describeMove"]) {
-    if (engine[fn] !== undefined && typeof engine[fn] !== "function") problems.push(`GameEngine.${fn} must be a function if defined.`);
+  if (engine.evaluate !== undefined && typeof engine.evaluate !== "function") problems.push("GameEngine.evaluate must be a function if defined.");
+  // The shell's tutorial (move log, hints, coach, How to play card) is built from these.
+  if (typeof engine.describeMove !== "function") {
+    problems.push('GameEngine.describeMove(state, move) must be a function returning short public text like "played 7♥".');
+  }
+  if (typeof engine.explainTurn !== "function") {
+    problems.push("GameEngine.explainTurn(state, player) must be a function returning one or two sentences that tell " +
+      "the player what to decide now (used by the Coach).");
+  }
+  const steps = engine.quickStart;
+  if (!Array.isArray(steps) || steps.length < 2 || steps.length > 6 ||
+      !steps.every((x) => typeof x === "string" && x.trim() && x.length <= 240)) {
+    problems.push("GameEngine.quickStart must be an array of 3 to 5 short strings (one sentence each) for the " +
+      `first page of the tutorial: the goal, a turn, the key rule, how it ends. Got ${json(steps)?.slice(0, 200)}.`);
+  }
+  const phases = engine.turnPhases;
+  const phaseShape = (p) => p && typeof p === "object" && typeof p.id === "string" && p.id.trim() &&
+    typeof p.name === "string" && p.name.trim() && p.name.length <= 40 &&
+    typeof p.how === "string" && p.how.trim() && p.how.length <= 300 &&
+    (p.sometimes === undefined || typeof p.sometimes === "boolean");
+  if (!Array.isArray(phases) || phases.length < 1 || phases.length > 8 || !phases.every(phaseShape) ||
+      new Set(phases.map((p) => p.id)).size !== phases.length) {
+    problems.push("GameEngine.turnPhases must be an array of 1 to 8 parts of a turn, in order, each " +
+      '{ id: "roll", name: "Roll the dice" (1-3 words), how: one sentence on what the player can do in this part and ' +
+      "what to click, sometimes?: true when the part only happens on some turns }, with unique ids. " +
+      `A game with one kind of move has one part. Got ${json(phases)?.slice(0, 300)}.`);
+  }
+  if (typeof engine.turnPhase !== "function") {
+    problems.push("GameEngine.turnPhase(state) must be a function returning the id of the turnPhases entry the " +
+      "current player is in (the tutorial highlights it).");
+  }
+  const tutorial = engine.tutorial;
+  if (!tutorial || typeof tutorial !== "object" || !Array.isArray(tutorial.steps) || tutorial.steps.length < 3) {
+    problems.push("GameEngine.tutorial must be { intro?, steps: [...], outro } with at least 3 steps that walk player 1 " +
+      "through their first 3 moves (see the tutorial section of the contract).");
+  } else {
+    tutorial.steps.forEach((step, i) => {
+      if (typeof step?.say !== "function") problems.push(`GameEngine.tutorial.steps[${i}].say(state, move) must be a function returning text.`);
+      if (step?.choose !== undefined && typeof step.choose !== "function") {
+        problems.push(`GameEngine.tutorial.steps[${i}].choose must be a function (state, legalMoves) => move, or left out for an explanation step.`);
+      }
+    });
+    if (typeof tutorial.outro !== "string" || !tutorial.outro.trim()) {
+      problems.push("GameEngine.tutorial.outro must be a string: how to win, one strategy tip, what to try next.");
+    }
   }
   if (typeof engine.name !== "string" || !engine.name) problems.push("GameEngine.name must be a non-empty string.");
   const min = engine.minPlayers ?? engine.players, max = engine.maxPlayers ?? engine.players;
@@ -149,6 +192,68 @@ function checkHidden(engine, state, player) {
   }
 }
 
+// Replays the tutorial script from a fresh (randomly set up) game, the way the shell runs it.
+function tutorialRun(engine, run) {
+  const t = engine.tutorial;
+  const players = Number(t.players) || engine.players;
+  const min = engine.minPlayers ?? engine.players, max = engine.maxPlayers ?? engine.players;
+  if (!Number.isSafeInteger(players) || players < min || players > max) {
+    throw new Error(`tutorial.players must be a supported player count (${min}..${max}), got ${json(t.players)}.`);
+  }
+  let state = engine.initialState(players);
+  let learnerMoves = 0;
+  const learnerPhases = new Set(); // turn parts player 1 is walked through
+  const opponentsMoved = new Set();
+  for (const [i, step] of t.steps.entries()) {
+    const where = `tutorial.steps[${i}] (tutorial run ${run + 1}, a fresh random setup)`;
+    if (engine.result(state)) break;
+    const player = engine.currentPlayer(state);
+    const moves = engine.legalMoves(state);
+    if (!moves.length) throw new Error(`${where}: legalMoves(state) returned no moves but result(state) is null.`);
+    let move;
+    if (step.choose) {
+      const chosen = step.choose(state, moves);
+      move = moves.find((m) => json(m) === json(chosen));
+      if (move === undefined) {
+        throw new Error(`${where}: choose returned ${json(chosen)}, which is not a legal move for player ${player} here. ` +
+          `Legal moves: ${json(moves).slice(0, 400)}. Pick from legalMoves by a rule that works for any shuffle or roll, ` +
+          "and keep the steps in turn order (a step for player 1 only when currentPlayer is 1).");
+      }
+      if (json(step.choose(state, moves)) !== json(chosen)) throw new Error(`${where}: choose must be deterministic (no Math.random).`);
+    }
+    const text = step.say(engine.hidden ? engine.observe(state, 1) : state, move);
+    if (typeof text !== "string" || !text.trim() || text.length > 600) {
+      throw new Error(`${where}: say(state, move) must return 1 to 3 sentences of text (under 400 characters), got ${json(text)?.slice(0, 200)}.` +
+        (engine.hidden ? " It receives observe(state, 1): hidden parts are null." : ""));
+    }
+    if (move !== undefined) {
+      if (player === 1) {
+        learnerMoves++;
+        learnerPhases.add(engine.turnPhase(state));
+      } else opponentsMoved.add(player);
+      state = engine.applyMove(state, move);
+    }
+  }
+  const gameOver = !!engine.result(state);
+  const missed = engine.turnPhases.filter((p) => !p.sometimes && !learnerPhases.has(p.id));
+  if (missed.length && !gameOver) {
+    throw new Error(`The tutorial never has player 1 make a move in these parts of a turn: ` +
+      `${missed.map((p) => `"${p.name}" (${p.id})`).join(", ")} (tutorial run ${run + 1}). Walk the learner through ` +
+      "at least one complete turn of their own, every part in order, so they know how to play a whole turn. " +
+      "If a part only happens on some turns, mark it sometimes: true in turnPhases.");
+  }
+  const silent = Array.from({ length: players - 1 }, (_, i) => i + 2).filter((p) => !opponentsMoved.has(p));
+  if (silent.length && !gameOver) {
+    throw new Error(`The tutorial never shows a move by player(s) ${silent.join(", ")} (tutorial run ${run + 1}). ` +
+      "Include each opponent's turn as its own step(s) in turn order, so the learner sees a full round.");
+  }
+  if (learnerMoves < 3) {
+    throw new Error(`The tutorial only has player 1 make ${learnerMoves} move(s) (tutorial run ${run + 1}). It must walk ` +
+      "them through at least 3 of their own moves: steps with choose() that run when currentPlayer(state) is 1, " +
+      "with the opponents' replies as their own steps in between.");
+  }
+}
+
 function playout(engine, players, maxMoves) {
   const history = [];
   const branching = [];
@@ -179,8 +284,21 @@ function playout(engine, players, maxMoves) {
       branching.push(moves.length);
       const move = moves[Math.floor(Math.random() * moves.length)];
       if (json(move) === undefined) throw new Error(`Moves must be JSON-serializable, got ${String(move)}.`);
-      if (engine.describeMove && typeof engine.describeMove(state, move) !== "string") {
-        throw new Error("describeMove(state, move) must return a string.");
+      const described = engine.describeMove(state, move);
+      if (typeof described !== "string" || !described.trim()) {
+        throw new Error(`describeMove(state, ${json(move)}) must return a non-empty string, got ${json(described)}.`);
+      }
+      const phase = engine.turnPhase(state);
+      if (!engine.turnPhases.some((p) => p.id === phase)) {
+        throw new Error(`turnPhase(state) returned ${json(phase)}, which is not an id in turnPhases ` +
+          `(${engine.turnPhases.map((p) => json(p.id)).join(", ")}). It must name the part of the turn player ${player} is in.`);
+      }
+      // The coach calls explainTurn on what the player can see (the observed state in hidden games).
+      const seen = engine.hidden ? engine.observe(state, player) : state;
+      const explained = engine.explainTurn(seen, player);
+      if (typeof explained !== "string" || !explained.trim() || explained.length > 400) {
+        throw new Error(`explainTurn(state, ${player}) must return one or two sentences (1 to 300 characters), got ` +
+          `${json(explained)?.slice(0, 200)}.` + (engine.hidden ? " In hidden games it receives observe(state, player): hidden parts are null." : ""));
       }
       const before = json(state);
       const next = engine.applyMove(state, move);
@@ -286,6 +404,9 @@ export async function checkGame(gameFile, { playouts, maxMoves }) {
       catch (error) { return fail("playout", [error.message]); }
     }
     if (scriptErrors.length) return fail("playout", scriptErrors);
+    // The tutorial script is replayed after the playouts, so plain engine bugs are reported first.
+    try { for (let run = 0; run < 8; run++) tutorialRun(engine, run); }
+    catch (error) { return fail("playout", [describe(error)]); }
 
     const shell = window.GameShell;
     if (!shell) return fail("load", ["The shell did not start; GameView.mount may have failed."]);
@@ -295,6 +416,15 @@ export async function checkGame(gameFile, { playouts, maxMoves }) {
     // dismissed) so update() renders many positions, and click around the board as a human would.
     const aiStates = [];
     try {
+      // Click through the tutorial as a learner would, then play on with the coach box shown on every position.
+      shell.startTutorial();
+      for (let i = 0; i < 200 && shell.tutorialPhase && shell.tutorialPhase !== "outro"; i++) {
+        clickEverything(); // makes the learner's move: the taught one, or any legal one in the practice turn
+        shell.tutorialNext(true);
+      }
+      if (shell.tutorialPhase !== "outro") throw new Error("The tutorial did not reach its last page when clicked through.");
+      shell.exitTutorial();
+      shell.setCoach(true);
       const games = Math.max(1, Math.ceil(3 / counts.length));
       for (const n of counts) {
         shell.configure({ players: n, seats: Array(n).fill("human") });
